@@ -40,7 +40,7 @@ Phase 1's gate is green, stop.
 - **Every phase ends with a gate.** A gate is a checklist. If any item is red, the phase is not done.
 - **Build stubs honestly.** If a feature is not in this phase, leave a stub that fails loud, not a
   fake that pretends to work.
-- **When you finish a task, write a one-line entry** in `PROJECT_FEATURES.md` (what shipped) and, if
+- **When you finish a task, write a one-line entry** in `docs/PROJECT_FEATURES.md` (what shipped) and, if
   you made a non-obvious choice, a decision record in `docs/decisions/`.
 
 Legend: ◻ = task, ✅ = exit-gate item.

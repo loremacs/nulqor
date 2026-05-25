@@ -7,7 +7,13 @@ schema-version = "1.0.0"
 min-core       = "0.1.0"
 
 [[commands]]
-id           = "canvas:status@1"
-owner        = "host"
-permission   = "read"
+id            = "canvas:status@1"
+owner         = "host"
+permission    = "read"
 output-schema = '{ "ready": "boolean" }'
+
+[[commands]]
+id            = "canvas:config@1"
+owner         = "host"
+permission    = "read"
+output-schema = '{ "open_panels": "array", "shell": "object", "panels": "array" }'

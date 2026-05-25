@@ -1,0 +1,30 @@
+# Nulqor startup — shell loads host desk; panels open as tiles on the grid.
+# Restart after changing enabled_extensions. Panel open/close is live in the Apps menu.
+
+open_panels = ["hello-world"]
+
+enabled_extensions = [
+  "host",
+  "hello-world",
+]
+
+[shell]
+cell_pixels = 64
+snap_enabled = true
+show_grid = true
+
+# Full AI harness (swap enabled_extensions; add panels via Apps menu or open_panels):
+# open_panels = ["chat-panel"]
+# enabled_extensions = [
+#   "host",
+#   "hello-panel",
+#   "provider-lmstudio",
+#   "transcript",
+#   "http-api",
+#   "chat-panel",
+#   "context-editor",
+#   "mcp-bridge",
+#   "skill-runner",
+#   "validation",
+#   "run-logger",
+# ]

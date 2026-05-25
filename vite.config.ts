@@ -14,7 +14,6 @@ export default defineConfig({
       ? { protocol: "ws", host, port: 1421 }
       : undefined,
     watch: {
-      // Don't watch the Rust build output
       ignored: ["**/src-tauri/**"],
     },
   },

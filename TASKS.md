@@ -9,7 +9,7 @@ Active task queue. Read before starting non-trivial work. Full phase specs in `d
 | # | Task | Status | Notes |
 |---|---|---|---|
 | 0.1 | Create Tauri 2 + Rust + TypeScript project; window opens titled "Nulqor" | ✅ Done | `src-tauri/`, `src/`, `package.json` |
-| 0.2 | Repo layout: `docs/`, `extensions/`, `skills/`, `TASKS.md`, `.gitignore` | ✅ Done | Docs copied from `new-plans/` |
+| 0.2 | Repo layout: `docs/`, `extensions/`, `skills/`, `TASKS.md`, `.gitignore` | ✅ Done | Planning docs in `docs/`; superseded copies in `archive/new-plans/` |
 | 0.3 | Write `tools/nulqor-lint` binary | ✅ Done | 12/12 tests pass |
 | 0.4 | CI: GitHub Actions builds app on all target OSes, runs linter | ⬜ Pending | |
 
@@ -43,7 +43,7 @@ Active task queue. Read before starting non-trivial work. Full phase specs in `d
 | 2.1 | `extensions/provider-lmstudio/` — slotted provider, single-flight queue | ✅ Done | 4 tests; background generate task |
 | 2.2 | `extensions/transcript/` — shared session, message schema, JSONL schema | ✅ Done | 3 tests; stream-done subscription |
 | 2.3 | `extensions/http-api/` — axum HTTP + WebSocket, observer/catch-up | ✅ Done | 6 tests; full decisions/006 §1–3 surface |
-| 2.4 | `extensions/chat-panel/` — TypeScript chat UI, streaming, reasoning blocks | ✅ Done | `src/main.ts`, `src/style.css` |
+| 2.4 | `extensions/chat-panel/` — TypeScript chat UI, streaming, reasoning blocks | ✅ Done | `ui/main.ts`, `ui/style.css` |
 | 2.5 | `extensions/context-editor/` — skills/agents/rules, system prompt, hot-reload | ✅ Done | 4 tests; YAML frontmatter, file watcher |
 | 2.6 | `extensions/mcp-bridge/` — stdio MCP proxy, 5 tools | ✅ Done | 2 tests; NULQOR_API_URL override |
 

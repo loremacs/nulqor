@@ -12,15 +12,17 @@ param(
 )
 
 # TODO: Implement skill contract schema validation (Phase 4+)
-# For now, check that SKILL.md exists in the given path.
+# For now, check that SKILL.md (or skill.md) exists in the given path.
 
 $skillMd = Join-Path $SkillPath "SKILL.md"
-if (-not (Test-Path $skillMd)) {
-    Write-Host "FAIL: $SkillPath: SKILL.md not found"
+$skillMdLower = Join-Path $SkillPath "skill.md"
+
+if (-not (Test-Path $skillMd) -and -not (Test-Path $skillMdLower)) {
+    Write-Host "FAIL: ${SkillPath}: SKILL.md not found"
     exit 1
 }
 
 if (-not $Quiet) {
-    Write-Host "OK: $SkillPath (stub — full validation not yet implemented)"
+    Write-Host "OK: ${SkillPath} (stub - full validation not yet implemented)"
 }
 exit 0

@@ -13,6 +13,9 @@
 //!
 //! NOTHING outside this list belongs in the core.
 
+// Scaffold-phase extensions and core APIs are partially wired; silence until Phase 2+.
+#![allow(dead_code)]
+
 use std::sync::Arc;
 
 use tauri::Manager;
@@ -22,21 +25,12 @@ mod commands;
 mod context;
 mod error;
 mod events;
-mod ext_chat_panel;
-mod ext_context_editor;
-mod ext_hello_panel;
-mod ext_host;
-mod ext_http_api;
-mod ext_mcp_bridge;
-mod ext_provider_lmstudio;
-mod ext_run_logger;
-mod ext_skill_runner;
-mod ext_transcript;
-mod ext_validation;
+mod extensions;
 mod ipc;
 mod loader;
 mod permission;
 mod runtime;
+mod startup_config;
 mod types;
 mod version;
 
@@ -44,6 +38,11 @@ use capability::{CapabilityRegistry, Capabilities};
 use commands::CommandRegistry;
 use context::{AppState, CoreContext, InMemoryConfigStore};
 use events::EventBus;
+use extensions::{
+    chat_panel, context_editor, hello_panel, hello_world, host, http_api, mcp_bridge,
+    provider_lmstudio, run_logger, skill_runner, transcript, validation,
+};
+use startup_config::load_startup_config;
 use permission::PermissionGate;
 use runtime::Runtime;
 use version::VersionManager;
@@ -69,27 +68,50 @@ fn build_core(_extensions_dir: &std::path::Path) -> CoreContext {
 fn load_extensions(extensions_dir: &std::path::Path, ctx: &CoreContext) {
     // Repo root is the parent of extensions/
     let root = extensions_dir.parent().unwrap_or(extensions_dir);
+    let startup = load_startup_config(root);
+
+    let canvas_config =
+        startup_config::canvas_config_json(&startup, extensions_dir);
+    if let Err(e) = ctx.config.set("host", "canvas", canvas_config) {
+        eprintln!("[CONFIG] failed to store canvas config: {e}");
+    }
+
+    if let Some(ref enabled) = startup.enabled_extensions {
+        for panel_id in &startup.open_panels {
+            if !enabled.contains(panel_id) {
+                eprintln!(
+                    "[CONFIG] warning: open_panels '{panel_id}' is not in enabled_extensions",
+                );
+            }
+        }
+    }
 
     let mut loader = loader::Loader::new();
-    loader.register("host", |m| Arc::new(ext_host::HostExtension::new(m)));
-    loader.register("hello-panel", |m| Arc::new(ext_hello_panel::HelloPanelExtension::new(m)));
+    loader.register("host", |m| Arc::new(host::HostExtension::new(m)));
+    loader.register("hello-panel", |m| Arc::new(hello_panel::HelloPanelExtension::new(m)));
+    loader.register("hello-world", |m| Arc::new(hello_world::HelloWorldExtension::new(m)));
     loader.register("provider-lmstudio", |m| {
-        Arc::new(ext_provider_lmstudio::LmStudioProvider::new(m))
+        Arc::new(provider_lmstudio::LmStudioProvider::new(m))
     });
-    loader.register("transcript", |m| Arc::new(ext_transcript::TranscriptExtension::new(m)));
-    loader.register("http-api", |m| Arc::new(ext_http_api::HttpApiExtension::new(m)));
-    loader.register("chat-panel", |m| Arc::new(ext_chat_panel::ChatPanelExtension::new(m)));
+    loader.register("transcript", |m| Arc::new(transcript::TranscriptExtension::new(m)));
+    loader.register("http-api", |m| Arc::new(http_api::HttpApiExtension::new(m)));
+    loader.register("chat-panel", |m| Arc::new(chat_panel::ChatPanelExtension::new(m)));
     loader.register("context-editor", |m| {
-        Arc::new(ext_context_editor::ContextEditorExtension::new(m))
+        Arc::new(context_editor::ContextEditorExtension::new(m))
     });
-    loader.register("mcp-bridge", |m| Arc::new(ext_mcp_bridge::McpBridgeExtension::new(m)));
+    loader.register("mcp-bridge", |m| Arc::new(mcp_bridge::McpBridgeExtension::new(m)));
     loader.register("skill-runner", |m| {
-        Arc::new(ext_skill_runner::SkillRunnerExtension::new(m))
+        Arc::new(skill_runner::SkillRunnerExtension::new(m))
     });
-    loader.register("validation", |m| Arc::new(ext_validation::ValidationExtension::new(m)));
-    loader.register("run-logger", |m| Arc::new(ext_run_logger::RunLoggerExtension::new(m)));
+    loader.register("validation", |m| Arc::new(validation::ValidationExtension::new(m)));
+    loader.register("run-logger", |m| Arc::new(run_logger::RunLoggerExtension::new(m)));
 
-    match loader.scan_and_load(extensions_dir, root, ctx) {
+    match loader.scan_and_load(
+        extensions_dir,
+        root,
+        ctx,
+        startup.enabled_extensions.as_ref(),
+    ) {
         Ok(_) => eprintln!("[CORE] all extensions loaded successfully"),
         Err(e) => eprintln!("[CORE] extension load error: {e}"),
     }

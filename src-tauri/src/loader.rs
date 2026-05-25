@@ -50,13 +50,15 @@ impl Loader {
         self.factories.insert(id.to_owned(), Box::new(factory));
     }
 
-    /// Discover, lint, sort, and activate all extensions in `extensions_dir`.
+    /// Discover, lint, sort, and activate extensions in `extensions_dir`.
     /// `root` is the repo root used by the linter for depth calculations.
+    /// When `enabled_filter` is `Some`, only listed ids (plus transitive `requires`) load.
     pub fn scan_and_load(
         &self,
         extensions_dir: &Path,
         root: &Path,
         ctx: &CoreContext,
+        enabled_filter: Option<&HashSet<String>>,
     ) -> Result<(), CoreError> {
         // 1. Discover extension directories
         let ext_dirs = self.discover(extensions_dir)?;
@@ -78,6 +80,16 @@ impl Loader {
 
             let manifest = convert_manifest(raw).map_err(|e| CoreError::Linter(e))?;
             manifests.push((ext_dir.clone(), manifest));
+        }
+
+        if let Some(enabled) = enabled_filter {
+            let expanded = expand_enabled_with_deps(&manifests, enabled)?;
+            manifests.retain(|(_, m)| expanded.contains(&m.id));
+            eprintln!(
+                "[LOADER] startup profile: loading {} of {} discovered extensions",
+                manifests.len(),
+                ext_dirs.len()
+            );
         }
 
         // 3. Topological sort by `requires`
@@ -204,6 +216,39 @@ impl Loader {
         result.push(id.to_owned());
         Ok(())
     }
+}
+
+/// Expand an explicit enable list to include all transitive `requires` dependencies.
+pub fn expand_enabled_with_deps(
+    manifests: &[(PathBuf, ExtensionManifest)],
+    enabled: &HashSet<String>,
+) -> Result<HashSet<String>, CoreError> {
+    let index: HashMap<&str, &ExtensionManifest> =
+        manifests.iter().map(|(_, m)| (m.id.as_str(), m)).collect();
+
+    let mut expanded = HashSet::new();
+    let mut stack: Vec<&String> = enabled.iter().collect();
+
+    while let Some(id) = stack.pop() {
+        if !expanded.insert(id.clone()) {
+            continue;
+        }
+        let manifest = index.get(id.as_str()).ok_or_else(|| {
+            CoreError::ExtensionNotFound(format!(
+                "enabled extension '{id}' is not installed"
+            ))
+        })?;
+        for dep in &manifest.requires {
+            if !index.contains_key(dep.as_str()) {
+                return Err(CoreError::ExtensionNotFound(format!(
+                    "enabled extension '{id}' requires '{dep}' but it is not installed"
+                )));
+            }
+            stack.push(dep);
+        }
+    }
+
+    Ok(expanded)
 }
 
 // ---------------------------------------------------------------------------
@@ -370,7 +415,7 @@ min-core = "0.1.0"
         let ctx = make_context();
         let mut loader = Loader::new();
         loader.register("svc", |m| Arc::new(NoopExt(m)));
-        let result = loader.scan_and_load(&root.join("extensions"), &root, &ctx);
+        let result = loader.scan_and_load(&root.join("extensions"), &root, &ctx, None);
         assert!(result.is_ok(), "expected ok, got: {result:?}");
     }
 
@@ -393,7 +438,7 @@ min-core = "0.1.0"
         let ctx = make_context();
         let mut loader = Loader::new();
         loader.register("bad", |m| Arc::new(NoopExt(m)));
-        let result = loader.scan_and_load(&root.join("extensions"), &root, &ctx);
+        let result = loader.scan_and_load(&root.join("extensions"), &root, &ctx, None);
         assert!(
             matches!(result, Err(CoreError::Linter(_))),
             "expected Linter error, got: {result:?}"
@@ -430,9 +475,49 @@ requires = ["a"]
             o2.lock().unwrap().push("b".into());
             Arc::new(NoopExt(m))
         });
-        loader.scan_and_load(&root.join("extensions"), &root, &ctx).unwrap();
+        loader.scan_and_load(&root.join("extensions"), &root, &ctx, None).unwrap();
         let loaded = order.lock().unwrap().clone();
         assert_eq!(loaded, vec!["a", "b"], "b must load after a");
+    }
+
+    #[test]
+    fn enabled_filter_loads_subset_and_deps() {
+        let root = tmp_dir();
+        write(&root, "extensions/a/extension.toml", &valid_toml("a"));
+        write(
+            &root,
+            "extensions/b/extension.toml",
+            r#"[extension]
+id = "b"
+version = "0.1.0"
+kind = "Service"
+api-version = "v1"
+schema-version = "1.0.0"
+min-core = "0.1.0"
+requires = ["a"]
+"#,
+        );
+        write(&root, "extensions/c/extension.toml", &valid_toml("c"));
+        let ctx = make_context();
+        let mut loader = Loader::new();
+        let loaded = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let l1 = loaded.clone();
+        loader.register("a", move |m| {
+            l1.lock().unwrap().push("a".into());
+            Arc::new(NoopExt(m))
+        });
+        let l2 = loaded.clone();
+        loader.register("b", move |m| {
+            l2.lock().unwrap().push("b".into());
+            Arc::new(NoopExt(m))
+        });
+        loader.register("c", move |m| Arc::new(NoopExt(m)));
+        let enabled: HashSet<String> = ["b".into()].into_iter().collect();
+        loader
+            .scan_and_load(&root.join("extensions"), &root, &ctx, Some(&enabled))
+            .unwrap();
+        let ids = loaded.lock().unwrap().clone();
+        assert_eq!(ids, vec!["a", "b"], "b must pull in required a, skip c");
     }
 
     #[test]
@@ -441,7 +526,7 @@ requires = ["a"]
         write(&root, "extensions/orphan/extension.toml", &valid_toml("orphan"));
         let ctx = make_context();
         let loader = Loader::new(); // no factory registered
-        let result = loader.scan_and_load(&root.join("extensions"), &root, &ctx);
+        let result = loader.scan_and_load(&root.join("extensions"), &root, &ctx, None);
         assert!(
             matches!(result, Err(CoreError::ExtensionNotFound(_))),
             "expected ExtensionNotFound, got: {result:?}"

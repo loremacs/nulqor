@@ -1,0 +1,8 @@
+[extension]
+id             = "hello-world"
+version        = "0.1.0"
+kind           = "Panel"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+requires       = ["host"]

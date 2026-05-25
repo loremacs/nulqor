@@ -6,10 +6,7 @@
 //! - `spawn_task`:    cancellable async I/O work with a timeout budget.
 //! - `spawn_compute`: CPU-bound work on the blocking thread pool.
 //! - `block_on`:      run a future from a synchronous (non-async) caller.
-//!
-//! `block_on` MUST NOT be called from within an async Tokio context — it panics
-//! in that case (the standard Tokio contract). Use it only from extension
-//! `activate()` methods, synchronous command handlers, or tests.
+//! - `block_on_compat`: like `block_on`, but safe from Tokio worker threads (HTTP API).
 
 use std::future::Future;
 use std::sync::Arc;
@@ -51,10 +48,32 @@ impl Runtime {
         self.rt.spawn_blocking(job)
     }
 
-    /// Block the calling (non-async) thread until `fut` completes on the
-    /// core runtime.  Panics if called from within an async Tokio task.
+    /// Block the calling thread until `fut` completes on the core runtime.
+    ///
+    /// Panics if called from within an async Tokio task on the same runtime.
+    /// Prefer [`block_on_compat`](Self::block_on_compat) from command handlers
+    /// that may be invoked while the HTTP API (or other async work) is active.
     pub fn block_on<F: Future>(&self, fut: F) -> F::Output {
         self.rt.block_on(fut)
+    }
+
+    /// Like `block_on`, but safe when the caller runs on a Tokio worker thread
+    /// (e.g. sync command handler invoked from the axum HTTP API).
+    ///
+    /// Dispatches `block_on` on a short-lived std thread when already inside
+    /// an async runtime context.
+    pub fn block_on_compat<F, T>(&self, fut: F) -> T
+    where
+        F: Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            // Called from a Tokio worker (e.g. HTTP API → sync command handler).
+            // block_in_place frees the worker so block_on can poll the future.
+            tokio::task::block_in_place(|| self.rt.handle().block_on(fut))
+        } else {
+            self.rt.block_on(fut)
+        }
     }
 }
 
@@ -101,9 +120,25 @@ mod tests {
     }
 
     #[test]
-    fn block_on_works_from_sync_context() {
+    fn block_on_compat_matches_block_on_from_sync() {
         let rt = Runtime::new();
-        let result = rt.block_on(async { 7u32 * 6 });
-        assert_eq!(result, 42);
+        assert_eq!(rt.block_on_compat(async { 7u32 * 6 }), 42);
+    }
+
+    #[test]
+    fn block_on_compat_works_from_spawned_async_task() {
+        use std::sync::mpsc;
+        use std::sync::Arc;
+        use std::time::Duration as StdDuration;
+
+        let rt = Arc::new(Runtime::new());
+        let (tx, rx) = mpsc::channel();
+        let rt2 = rt.clone();
+        rt.spawn_task(Duration::from_secs(5), async move {
+            let n = rt2.block_on_compat(async { 99_u32 });
+            let _ = tx.send(n);
+        });
+        let got = rx.recv_timeout(StdDuration::from_secs(2)).expect("timed out waiting for result");
+        assert_eq!(got, 99);
     }
 }
