@@ -1,60 +1,60 @@
-# create-extension
+---
+name: create-extension
+description: Scaffold extensions/<id>/ with colocated manifest, Rust, and optional panel UI. Use before adding any new extension.
+---
 
-**Type:** Skill  
-**Status:** Active
+## Metadata
 
-## Purpose
+```text
+version:       1.0.0
+topics:        meta, extensions, scaffold, tauri
+platform:      all
+script_policy: required
+scope:         project-scoped
+```
 
-Scaffold a new extension under `extensions/<id>/` using the colocated layout (manifest + `src/lib.rs` + optional `ui/`). Updates `mod.rs` bridge and `extensions/index.md`. Never hand-create extension folders without this script.
+Never hand-create extension folders. Always run `scripts/create.ps1` first.
+
+---
+
+## When to use
+
+- Adding a new Nulqor extension (Service, Panel, Host, or Provider).
+- Asked to scaffold extension layout under `extensions/<id>/`.
+
+Do not use for skills — use `create-skill`.
+
+---
 
 ## Contract
 
-```yaml
-name: create-extension
-version: 0.1.0
-inputs:
-  - id: kebab-case extension id (folder name)
-  - kind: Service | Panel | Host | Provider
-  - purpose: one-line description for README and index
-  - requires: optional comma-separated extension ids
-outputs:
-  - scaffold_path: extensions/<id>/
-  - follow_up: loader.register line to add in src-tauri/src/lib.rs
-tool_loop_cap: 5
+```text
+when:         Before creating any new extension directory
+inputs:       id (kebab-case), kind, purpose, optional requires (comma-separated ids)
+outputs:      extensions/<id>/ tree; mod.rs bridge; index row; loader.register hint
+side-effects: creates files; updates extensions/index.md and mod.rs
+validation:   audit-project passes; loader.register added to lib.rs
 ```
 
-## Usage
+---
 
-Before creating any new extension:
+## Steps
 
-```powershell
-skills/create-extension/scripts/create.ps1 `
-  -Id my-extension `
-  -Kind Service `
-  -Purpose "Short description of what it does"
-```
+1. Run `scripts/create.ps1` or `scripts/create.sh`:
 
-Panel with dependencies:
+   ```powershell
+   skills/create-extension/scripts/create.ps1 -Id my-extension -Kind Service -Purpose "..."
+   ```
 
-```powershell
-skills/create-extension/scripts/create.ps1 `
-  -Id my-panel `
-  -Kind Panel `
-  -Purpose "Dashboard for X" `
-  -Requires "host,transcript"
-```
+2. Add `loader.register(...)` to `src-tauri/src/lib.rs`.
 
-Then:
+3. Implement `extensions/<id>/src/lib.rs` and optional `ui/`.
 
-1. Add the printed `loader.register(...)` line to `src-tauri/src/lib.rs` in `load_extensions()`.
-2. Implement commands/events in `extensions/<id>/src/lib.rs`.
-3. For `Panel` kind, implement `extensions/<id>/ui/`.
-4. Run `skills/audit-project/scripts/audit.ps1 -Quiet`.
-5. Run `cargo test --workspace`.
+4. Run `skills/audit-project/scripts/audit.ps1 -Quiet` and `cargo test --workspace`.
 
-## Layout contract (enforced by audit-project)
+---
 
-- All extension Rust → `extensions/<id>/src/lib.rs`
-- Panel UI → `extensions/<id>/ui/`
-- Never add `src-tauri/src/ext_*.rs` or root `src/*.ts`
-- Registry must stay in sync: disk ↔ `extensions/index.md` ↔ `mod.rs` ↔ `lib.rs` loader
+## Verification
+
+- [ ] `extensions/<id>/` exists with manifest, README, `src/lib.rs`.
+- [ ] `audit-project` exit code 0.

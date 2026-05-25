@@ -62,13 +62,16 @@ impl ContextStore {
     fn load_from(root: &Path) -> Self {
         let mut store = ContextStore::default();
 
-        // Skills: skills/<name>/SKILL.md with YAML frontmatter
+        // Skills: skills/<name>/SKILL.md (preferred) or skill.md — YAML frontmatter
         let skills_dir = root.join("skills");
         if let Ok(entries) = std::fs::read_dir(&skills_dir) {
             for entry in entries.flatten() {
-                let skill_md = entry.path().join("SKILL.md");
-                if skill_md.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&skill_md) {
+                if !entry.path().is_dir() {
+                    continue;
+                }
+                let skill_md = skill_file_path(&entry.path());
+                if let Some(path) = skill_md {
+                    if let Ok(content) = std::fs::read_to_string(&path) {
                         if let Some(meta) = parse_skill_frontmatter(&content) {
                             store.skills.push(meta);
                         }
@@ -167,6 +170,18 @@ fn interpolate_date(text: &str) -> String {
     let now = chrono::Utc::now();
     text.replace("{{current_date}}", &now.format("%Y-%m-%d").to_string())
         .replace("{{current_datetime}}", &now.format("%Y-%m-%d %H:%M UTC").to_string())
+}
+
+fn skill_file_path(skill_dir: &Path) -> Option<PathBuf> {
+    let uppercase = skill_dir.join("SKILL.md");
+    if uppercase.exists() {
+        return Some(uppercase);
+    }
+    let lowercase = skill_dir.join("skill.md");
+    if lowercase.exists() {
+        return Some(lowercase);
+    }
+    None
 }
 
 fn parse_skill_frontmatter(content: &str) -> Option<SkillMeta> {

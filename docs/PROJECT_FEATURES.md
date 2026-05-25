@@ -25,17 +25,32 @@ Canonical record of every shipped feature. Each entry provides enough implementa
 **Key functions:** `lint_extension(dir) → Vec<LintError>`. Run: `cargo run --manifest-path tools/nulqor-lint/Cargo.toml -- <dir>`.
 
 ### 0.4 Project layout audit (`skills/audit-project`)
-**Files:** `skills/audit-project/scripts/audit.ps1`, `skills/audit-project/skill.md`
+**Files:** `skills/audit-project/scripts/audit.ps1`, `skills/audit-project/SKILL.md`
 **Purpose:** Enforces colocated extension layout, forbidden legacy paths, registry sync (disk ↔ `extensions/index.md` ↔ `mod.rs` ↔ `lib.rs`), and invokes `nulqor-lint`.
 **Run:** `skills/audit-project/scripts/audit.ps1 -Quiet`
 
+### 0.4a Skill structural audit (`skills/audit-skill`)
+**Files:** `skills/audit-skill/scripts/audit.ps1`, `skills/audit-skill/scripts/audit.sh`, `skills/audit-skill/SKILL.md`, `skills/audit-skill/REFERENCE.md`
+**Purpose:** Lints all skills for file layout, frontmatter (`name`, `description` only), `## Metadata`, text `## Contract`, index registration, script policy, and script security patterns. PASS/WARN/FAIL per skill.
+**Run:** `skills/audit-skill/scripts/audit.ps1 [-SkillName <name>] [-Quiet] [-Json]`
+
 ### 0.5 Extension scaffold skill (`skills/create-extension`)
-**Files:** `skills/create-extension/scripts/create.ps1`, `skills/create-extension/skill.md`
+**Files:** `skills/create-extension/scripts/create.ps1`, `skills/create-extension/SKILL.md`
 **Purpose:** Creates `extensions/<id>/` with `extension.toml`, `README.md`, `src/lib.rs`, optional `ui/`; appends `mod.rs` bridge and index row. Prints required `loader.register` line for `lib.rs`.
 **Run:** `skills/create-extension/scripts/create.ps1 -Id <id> -Kind Service -Purpose "..."`
 
+### 0.5b Skill scaffold skill (`skills/create-skill`)
+**Files:** `skills/create-skill/scripts/create.ps1`, `skills/create-skill/scripts/create.sh`, `skills/create-skill/SKILL.md`, `REFERENCE.md`, `FORMS.md`, `references/skill-format.md`
+**Purpose:** Scaffolds `skills/<name>/` with YAML frontmatter (`name`, `description`), body `## Metadata` block (version, topics, platform, script_policy, scope), and required sections. Inserts `Skill | Purpose` row into `skills/index.md`. Runs `audit-skill` on the new skill.
+**Run:** `skills/create-skill/scripts/create.ps1 -SkillName <name> -Description "..." -Topics "..." [-Root .]`
+
+### 0.5a Edit and verify (`skills/edit-and-verify`)
+**Files:** `skills/edit-and-verify/SKILL.md`
+**Purpose:** Standard agent loop for code changes: read `AGENTS.md`, minimal diff, run `tsc`/`cargo check`/audits, report failures.
+**Run:** Follow skill body; no dedicated script.
+
 ### 0.6 Communicate with running app (`skills/nulqor-communicate`)
-**Files:** `skills/nulqor-communicate/scripts/chat.ps1`, `skills/nulqor-communicate/skill.md`
+**Files:** `skills/nulqor-communicate/scripts/chat.ps1`, `skills/nulqor-communicate/SKILL.md`
 **Purpose:** Documents all external communication paths (HTTP :8080, MCP stdio, mcp-bridge commands, WebSocket, Tauri IPC). Script wraps observer register + send + transcript poll.
 **Run:** `skills/nulqor-communicate/scripts/chat.ps1 -Action send -Message "..."`
 
@@ -46,7 +61,7 @@ Canonical record of every shipped feature. Each entry provides enough implementa
 ### 0.7 Startup profile (`nulqor.toml`) + canvas shell (`host`)
 **Files:** `nulqor.toml`, `src-tauri/src/startup_config.rs`, `extensions/host/ui/`
 **Purpose:** Root config selects enabled extensions and initial open panels; host shell is always the window UI.
-**Keys:** `open_panels`, `enabled_extensions`, `[shell]` (`grid_cols`, `grid_rows`, `snap_enabled`, `show_grid`).
+**Keys:** `open_panels`, `enabled_extensions`, `[shell]` (`cell_pixels`, `cell_step`, `snap_enabled`, `show_grid`, `click_through`, `always_on_top`).
 **Shell:** Transparent fullscreen window; menu bar + panel tiles are interactive. OS desktop click-through deferred until Tauri supports event forwarding with `setIgnoreCursorEvents`.
 **Commands:** `canvas:config@1` returns startup shell config + discovered Panel extensions.
 **Panel contract:** `extensions/<id>/ui/panel.ts` exports `mount(container)`; registered in `host/ui/panels.ts`.
@@ -131,7 +146,7 @@ Canonical record of every shipped feature. Each entry provides enough implementa
 
 ### 2.5 Context editor extension (`extensions/context-editor/`)
 **Files:** `extension.toml`, `src/lib.rs`
-**Purpose:** Loads skills (`skills/<name>/SKILL.md` YAML frontmatter), agents (`AGENTS.md`, `agents/<n>.md`), rules (`rules/*.{md,mdc,txt}`, alphabetical). Assembles system prompt in order: persona → rules → skill index. Hot-reloads on file change via `notify` watcher. Interpolates `{{current_date}}` and `{{current_datetime}}` in all text at assembly time.
+**Purpose:** Loads skills (`skills/<name>/SKILL.md` YAML frontmatter; falls back to `skill.md`), agents (`AGENTS.md`, `agents/<n>.md`), rules (`rules/*.{md,mdc,txt}`, alphabetical). Assembles system prompt in order: persona → rules → skill index. Hot-reloads on file change via `notify` watcher. Interpolates `{{current_date}}` and `{{current_datetime}}` in all text at assembly time.
 **Commands:** `context-editor:reload@1()`, `context-editor:list-skills@1()`, `context-editor:list-agents@1()`, `context-editor:list-rules@1()`, `context-editor:load-skill@1({ name })`, `context-editor:system-prompt@1({ agent? })`.
 **CWD note:** In dev mode cargo sets CWD to `src-tauri/`. `resolve_workspace_root()` walks up to the workspace root automatically.
 
@@ -162,6 +177,10 @@ Canonical record of every shipped feature. Each entry provides enough implementa
 **Purpose:** Fix for the known Subject failure (Gemma 4 E4B turns 3, 6, 7, 8, 18 in harness run). Injects `Current date and time: {{current_datetime}}` into every system prompt.
 **Mechanism:** `context-editor` resolves `{{current_datetime}}` (and `{{current_date}}`) at prompt-assembly time via `interpolate_date()`. No code change needed per session — the rule is the entire artifact.
 **Validation:** Use `validation:check@1({ type: "is_date_like", actual: <model reply> })` to verify.
+
+### 3.3a Stack and tooling rule (`rules/stack-and-tooling.md`)
+**Purpose:** Always-on stack pins, verify commands (`tsc`, `cargo check`, audits), and code-location invariants for in-app self-editing agents. Complements `AGENTS.md` persona without duplicating the layout table.
+**Registry:** `rules/index.md`
 
 ### 3.4 Run-logger extension (`extensions/run-logger/`)
 **Files:** `extension.toml`, `src/lib.rs`

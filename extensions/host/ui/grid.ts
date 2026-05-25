@@ -14,6 +14,8 @@ export type GridMetrics = {
 };
 
 const GAP = 8;
+/** Menu bar thickness for every dock edge (top/bottom/left/right). */
+export const MENU_BAR_THICKNESS_PX = 30;
 
 function deskColumns(desktopW: number, step: number): number {
   return Math.max(1, Math.floor((desktopW + GAP) / step));
@@ -57,10 +59,7 @@ export function updateGridGeometry(
 
 export function applyMenuLayout(shellRoot: HTMLElement, dock: MenuDock): void {
   shellRoot.dataset.menuDock = dock;
-  shellRoot.style.setProperty(
-    "--menu-bar-thickness",
-    dock === "left" || dock === "right" ? "44px" : "36px",
-  );
+  shellRoot.style.setProperty("--menu-bar-thickness", `${MENU_BAR_THICKNESS_PX}px`);
 }
 
 export function pointerToGridCell(
@@ -112,6 +111,27 @@ export function nearestMenuDock(clientX: number, clientY: number): MenuDock {
   if (min === distBottom) return "bottom";
   if (min === distLeft) return "left";
   return "right";
+}
+
+/** Distance from viewport edge before dock snap preview appears (magnetic field). */
+export const MENU_DOCK_SNAP_ZONE_PX = 72;
+
+export function menuBarThicknessPx(_dock: MenuDock): number {
+  return MENU_BAR_THICKNESS_PX;
+}
+
+/** Nearest dock edge when pointer is within the snap zone; otherwise null. */
+export function menuDockSnapTarget(clientX: number, clientY: number): MenuDock | null {
+  const h = window.innerHeight;
+  const w = window.innerWidth;
+  const zone = MENU_DOCK_SNAP_ZONE_PX;
+  const distTop = clientY;
+  const distBottom = h - clientY;
+  const distLeft = clientX;
+  const distRight = w - clientX;
+  const min = Math.min(distTop, distBottom, distLeft, distRight);
+  if (min > zone) return null;
+  return nearestMenuDock(clientX, clientY);
 }
 
 export function clampTileToDesk(tile: TileLayout, metrics: GridMetrics): TileLayout {
@@ -186,4 +206,64 @@ export function tileLayoutFromPixelRect(
   const col = Math.min(maxCol, Math.max(1, Math.floor(rect.left / metrics.step) + 1));
   const row = Math.min(maxRow, Math.max(1, Math.floor(rect.top / metrics.step) + 1));
   return { id, col, row, colSpan, rowSpan };
+}
+
+type PixelRect = { left: number; top: number; width: number; height: number };
+
+/** Tile bounds in window (viewport) coordinates. */
+export function tileWindowRect(
+  tile: TileLayout,
+  metrics: GridMetrics,
+  snapEnabled: boolean,
+  desktopRect: DOMRect,
+): PixelRect {
+  const local = tileDisplayRect(tile, metrics, snapEnabled);
+  return {
+    left: desktopRect.left + local.left,
+    top: desktopRect.top + local.top,
+    width: local.width,
+    height: local.height,
+  };
+}
+
+/** Re-map a tile after the work area moves so its window position stays fixed. */
+export function tileFromWindowRect(
+  windowRect: PixelRect,
+  desktopRect: DOMRect,
+  metrics: GridMetrics,
+  tile: TileLayout,
+  snapEnabled: boolean,
+): TileLayout {
+  const local: PixelRect = {
+    left: windowRect.left - desktopRect.left,
+    top: windowRect.top - desktopRect.top,
+    width: windowRect.width,
+    height: windowRect.height,
+  };
+
+  if (snapEnabled) {
+    return clampTileToDesk(
+      {
+        ...tileLayoutFromPixelRect(local, metrics, tile.id),
+        pixelLock: undefined,
+        freeX: undefined,
+        freeY: undefined,
+      },
+      metrics,
+    );
+  }
+
+  const colSpan = Math.max(1, Math.min(metrics.cols, Math.round(local.width / metrics.step)));
+  const rowSpan = Math.max(1, Math.min(metrics.rows, Math.round(local.height / metrics.step)));
+  return clampTileToDesk(
+    {
+      ...tile,
+      colSpan,
+      rowSpan,
+      freeX: local.left,
+      freeY: local.top,
+      pixelLock: undefined,
+    },
+    metrics,
+  );
 }

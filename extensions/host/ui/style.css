@@ -21,138 +21,134 @@ body,
   --grid-rows: 8;
   --cell-size: 64px;
   --grid-gap: 8px;
-  --menu-bar-thickness: 36px;
-  --tile-bg: rgba(18, 18, 22, 0.92);
-  --menu-bg: rgba(24, 24, 30, 0.96);
+  --menu-bar-thickness: 30px;
+  --tile-bg: rgb(18, 18, 22);
+  --menu-bg: #181818;
+  --menu-fg: #cccccc;
+  --menu-fg-muted: #969696;
   --accent: #6ea8ff;
   position: relative;
   width: 100%;
   height: 100%;
+  pointer-events: none;
 }
 
-/* ── Menu bar: full span on docked edge ─────────────────────────────────── */
+.nulqor-shell .menu-bar,
+.nulqor-shell .panel-tile,
+.nulqor-shell .menu-dropdown.is-open {
+  pointer-events: auto;
+}
+
+/* ── Menu bar: VS Code–style flat chrome ─────────────────────────────────── */
 
 .menu-bar {
   position: fixed;
   z-index: 1000;
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0 0.75rem;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
   background: var(--menu-bg);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(14px);
+  border: none;
+  border-bottom: 1px solid #2b2b2b;
+  box-shadow: none;
+  backdrop-filter: none;
   user-select: none;
+  color: var(--menu-fg);
+  font-size: 13px;
+  line-height: 1;
 }
 
 .menu-bar[data-dock="top"] {
   top: 0;
-  left: 0;
   right: 0;
+  bottom: auto;
+  left: 0;
   width: 100%;
   height: var(--menu-bar-thickness);
-  border-radius: 0;
-  border-top: none;
-  border-left: none;
-  border-right: none;
 }
 
 .menu-bar[data-dock="bottom"] {
+  top: auto;
+  right: 0;
   bottom: 0;
   left: 0;
-  right: 0;
   width: 100%;
   height: var(--menu-bar-thickness);
-  border-radius: 0;
   border-bottom: none;
-  border-left: none;
-  border-right: none;
+  border-top: 1px solid #2b2b2b;
 }
 
 .menu-bar[data-dock="left"] {
   top: 0;
+  right: auto;
   bottom: 0;
   left: 0;
   width: var(--menu-bar-thickness);
   height: 100%;
   flex-direction: column;
   align-items: stretch;
-  padding: 0.5rem 0;
-  border-radius: 0;
-  border-left: none;
-  border-top: none;
   border-bottom: none;
+  border-right: 1px solid #2b2b2b;
 }
 
 .menu-bar[data-dock="right"] {
   top: 0;
-  bottom: 0;
   right: 0;
+  bottom: 0;
+  left: auto;
   width: var(--menu-bar-thickness);
   height: 100%;
   flex-direction: column;
   align-items: stretch;
-  padding: 0.5rem 0;
-  border-radius: 0;
-  border-right: none;
-  border-top: none;
   border-bottom: none;
+  border-left: 1px solid #2b2b2b;
 }
 
-.menu-bar-brand {
-  cursor: grab;
-  font-weight: 700;
-  font-size: 0.9rem;
-  letter-spacing: 0.02em;
-  padding: 0.25rem 0.5rem;
-  white-space: nowrap;
+.menu-bar-drag {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  cursor: grab;
+  padding: 0 8px;
+  min-height: var(--menu-bar-thickness);
+}
+
+.menu-bar[data-dock="left"] .menu-bar-drag,
+.menu-bar[data-dock="right"] .menu-bar-drag {
+  padding: 2px 0;
+  min-height: auto;
+}
+
+.menu-bar-drag:active {
+  cursor: grabbing;
+}
+
+.menu-bar-icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
 }
 
 .menu-bar {
   cursor: grab;
 }
 
-.menu-bar-brand:active {
-  cursor: grabbing;
-}
-
-.menu-bar[data-dock="left"] .menu-bar-brand,
-.menu-bar[data-dock="right"] .menu-bar-brand {
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  padding: 0.5rem 0;
-  text-align: center;
-}
-
-.menu-bar-items {
+.menu-bar-menus {
   display: flex;
-  align-items: center;
-  gap: 0.35rem;
+  align-items: stretch;
   flex-shrink: 0;
 }
 
-.menu-bar[data-dock="left"] .menu-bar-items,
-.menu-bar[data-dock="right"] .menu-bar-items {
-  flex-direction: column;
-  align-items: stretch;
-  width: 100%;
-}
-
-.menu-bar[data-dock="left"] .menu-btn,
-.menu-bar[data-dock="right"] .menu-btn {
-  width: 100%;
-  padding: 0.5rem 0.25rem;
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-}
-
-.menu-bar[data-dock="left"] .menu-window-controls,
-.menu-bar[data-dock="right"] .menu-window-controls {
+.menu-bar[data-dock="left"] .menu-bar-menus,
+.menu-bar[data-dock="right"] .menu-bar-menus {
   flex-direction: column;
   align-items: center;
   width: 100%;
+  gap: 1px;
+  padding: 2px 0;
 }
 
 .menu-bar-spacer {
@@ -168,66 +164,163 @@ body,
 
 .menu-group {
   position: relative;
+  display: flex;
+  align-items: stretch;
 }
 
-.menu-btn {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: inherit;
-  border-radius: 6px;
-  padding: 0.35rem 0.65rem;
-  cursor: pointer;
-  font-size: 0.85rem;
+.menu-bar[data-dock="left"] .menu-group,
+.menu-bar[data-dock="right"] .menu-group {
+  width: 100%;
+  justify-content: center;
 }
 
-.menu-btn:hover {
-  border-color: var(--accent);
+.menu-item {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--menu-fg);
+  border-radius: 0;
+  padding: 0 10px;
+  height: 100%;
+  min-height: var(--menu-bar-thickness);
+  cursor: default;
+  font: inherit;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.menu-item-icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  pointer-events: none;
+  opacity: 0.92;
+}
+
+.menu-item-label {
+  line-height: 1;
+}
+
+/* Top/bottom: text labels only (VS Code menu bar) */
+.menu-bar[data-dock="top"] .menu-item-icon,
+.menu-bar[data-dock="bottom"] .menu-item-icon {
+  display: none;
+}
+
+.menu-bar[data-dock="top"] .menu-item,
+.menu-bar[data-dock="bottom"] .menu-item {
+  gap: 0;
+  padding: 0 8px;
+}
+
+.menu-item:hover,
+.menu-group:has(.menu-dropdown.is-open) .menu-item {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.menu-group:has(.menu-dropdown.is-open) .menu-item-icon {
+  opacity: 1;
+}
+
+/* Side rail: icon-only (same thickness as top bar), labels via title tooltips */
+.menu-bar[data-dock="left"] .menu-item,
+.menu-bar[data-dock="right"] .menu-item {
+  width: 26px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  margin: 0 auto;
+  border-radius: 4px;
+}
+
+.menu-bar[data-dock="left"] .menu-item-icon,
+.menu-bar[data-dock="right"] .menu-item-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.menu-bar[data-dock="left"] .menu-item-label,
+.menu-bar[data-dock="right"] .menu-item-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .menu-window-controls {
   display: flex;
-  align-items: center;
-  gap: 0.35rem;
+  align-items: stretch;
   flex-shrink: 0;
+  margin-left: auto;
+}
+
+.menu-bar[data-dock="left"] .menu-window-controls,
+.menu-bar[data-dock="right"] .menu-window-controls {
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  margin-left: 0;
+  padding-bottom: 4px;
+  gap: 2px;
 }
 
 .menu-window-btn {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: inherit;
-  border-radius: 6px;
-  width: 1.75rem;
-  height: 1.75rem;
-  cursor: pointer;
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--menu-fg);
+  border-radius: 0;
+  width: 46px;
+  height: var(--menu-bar-thickness);
+  cursor: default;
   flex-shrink: 0;
-  font-size: 0.85rem;
+  font-size: 12px;
   line-height: 1;
   padding: 0;
 }
 
+.menu-bar[data-dock="left"] .menu-window-btn,
+.menu-bar[data-dock="right"] .menu-window-btn {
+  width: 26px;
+  height: 22px;
+  border-radius: 4px;
+  margin: 0 auto;
+}
+
 .menu-window-btn:hover {
-  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .menu-window-btn-close:hover {
-  background: rgba(232, 80, 80, 0.35);
-  border-color: rgba(232, 80, 80, 0.65);
+  background: #e81123;
+  color: #fff;
 }
 
 .menu-dropdown {
   position: absolute;
-  top: calc(100% + 6px);
+  top: 100%;
   left: 0;
-  min-width: 240px;
-  padding: 0.65rem;
+  min-width: 250px;
+  padding: 4px 0;
   background: var(--menu-bg);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  border: 1px solid #454545;
+  border-radius: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.36);
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0;
   z-index: 10;
   display: none;
+  font-size: 13px;
+  color: var(--menu-fg);
 }
 
 .menu-dropdown.is-open {
@@ -238,54 +331,125 @@ body,
   display: none !important;
 }
 
+.menu-dropdown-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 26px;
+  margin: 0;
+  padding: 0 20px 0 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  box-sizing: border-box;
+}
+
+.menu-dropdown-row:hover:not(:disabled):not(.menu-dropdown-row-disabled) {
+  background: #094771;
+  color: #fff;
+}
+
+.menu-dropdown-row:disabled,
+.menu-dropdown-row-disabled {
+  color: #656565;
+  cursor: default;
+  pointer-events: none;
+}
+
+.menu-dropdown-gutter {
+  flex-shrink: 0;
+  width: 28px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1;
+  color: inherit;
+}
+
+.menu-dropdown-check {
+  font-weight: 600;
+}
+
+.menu-dropdown-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menu-dropdown-row-sizes {
+  padding-right: 8px;
+}
+
+.menu-dropdown-values {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.menu-dropdown-inline-label {
+  color: var(--menu-fg-muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.menu-dropdown-row-value {
+  cursor: default;
+  padding-right: 12px;
+}
+
+.menu-dropdown-row-value:hover {
+  background: transparent;
+  color: var(--menu-fg);
+}
+
+.menu-dropdown-values .menu-dropdown-value {
+  width: 2.75rem;
+  margin-left: 0;
+}
+
+.menu-dropdown-value {
+  width: 3.5rem;
+  margin-left: auto;
+  padding: 2px 6px;
+  background: #3c3c3c;
+  border: 1px solid #3c3c3c;
+  border-radius: 2px;
+  color: var(--menu-fg);
+  font: inherit;
+  text-align: right;
+}
+
+.menu-dropdown-value:hover,
+.menu-dropdown-value:focus {
+  border-color: #007acc;
+  outline: none;
+}
+
+.menu-dropdown-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: #454545;
+  border: none;
+}
+
 .menu-bar[data-dock="left"] .menu-dropdown,
 .menu-bar[data-dock="right"] .menu-dropdown {
   top: 0;
-  left: calc(100% + 6px);
+  left: 100%;
 }
 
 .menu-bar[data-dock="bottom"] .menu-dropdown {
   top: auto;
-  bottom: calc(100% + 6px);
+  bottom: 100%;
 }
 
-.menu-dropdown label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  font-size: 0.9rem;
-}
-
-.settings-hint {
-  margin: 0;
-  font-size: 0.75rem;
-  line-height: 1.35;
-  color: rgba(255, 255, 255, 0.55);
-}
-
-.settings-sync {
-  justify-content: flex-start !important;
-}
-
-.menu-dropdown input[type="number"] {
-  width: 4rem;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: inherit;
-  border-radius: 4px;
-  padding: 0.2rem 0.35rem;
-}
-
-.apps-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
-  cursor: pointer;
-}
-
-/* ── Desktop grid: top-left aligned, fills area below/beside menu ─────── */
+/* ── Desktop grid: work area starts at the menu bar inner edge ─────────── */
 
 .nulqor-shell[data-menu-dock="top"] .desktop-grid {
   top: var(--menu-bar-thickness);
@@ -349,7 +513,6 @@ body,
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(10px);
 }
 
 .panel-tile-snap {
@@ -424,4 +587,51 @@ body,
   justify-content: center;
   height: 100%;
   font-size: 1.5rem;
+}
+
+/* ── Menu dock snap preview (ghost strip while dragging to an edge) ─────── */
+
+.menu-dock-preview {
+  --preview-thickness: 30px;
+  position: fixed;
+  z-index: 999;
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 2px solid var(--accent);
+  background: rgba(110, 168, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(110, 168, 255, 0.25);
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.menu-dock-preview.is-visible {
+  opacity: 1;
+}
+
+.menu-dock-preview[data-dock="top"] {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--preview-thickness);
+}
+
+.menu-dock-preview[data-dock="bottom"] {
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: var(--preview-thickness);
+}
+
+.menu-dock-preview[data-dock="left"] {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--preview-thickness);
+}
+
+.menu-dock-preview[data-dock="right"] {
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: var(--preview-thickness);
 }

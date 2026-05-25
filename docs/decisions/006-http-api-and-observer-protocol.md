@@ -208,12 +208,16 @@ UI and in the run log. This is a quality gate (`DESIGN.md §13`).
 ```
 ---
 name: <name>
-description: <one-line description shown in the compact index>
-triggers: [optional, keyword list for auto-injection]
+description: <what + when; shown in compact index>
 ---
 
-<Markdown body — injected on load_skill call>
+## Metadata
+(version, topics, platform, script_policy, scope — in body block, not frontmatter)
+
+## When to use / ## Contract / ## Steps / ## Verification
 ```
+
+Structural compliance: `skills/audit-skill/scripts/audit.ps1` (all skills or `-SkillName`).
 
 **Built-in tools (always registered by the skill runner extension):**
 

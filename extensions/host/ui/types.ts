@@ -5,8 +5,14 @@ export type PanelMount = {
 export type ShellConfig = {
   /** Fixed square cell edge length in pixels; does not change when the window resizes. */
   cell_pixels: number;
+  /** Arrow/spinner increment for the cell size control (pixels). */
+  cell_step: number;
   snap_enabled: boolean;
   show_grid: boolean;
+  /** Pass clicks on empty canvas areas to the OS desktop (fullscreen overlay mode). */
+  click_through: boolean;
+  /** Keep the Nulqor window above other applications. */
+  always_on_top: boolean;
 };
 
 export type PanelMeta = {
@@ -56,12 +62,32 @@ export type PersistedShellState = {
 
 export const STORAGE_KEY = "nulqor-shell-v7";
 
+export const CELL_PIXELS_MIN = 1;
+export const CELL_PIXELS_MAX = 256;
+export const CELL_STEP_MIN = 1;
+export const CELL_STEP_MAX = 256;
+
 export const DEFAULT_SHELL: ShellConfig = {
   cell_pixels: 64,
+  cell_step: 10,
   snap_enabled: true,
   show_grid: true,
+  click_through: true,
+  always_on_top: false,
 };
 
+export function clampCellPixels(value: number): number {
+  const n = Math.round(value);
+  if (!Number.isFinite(n)) return DEFAULT_SHELL.cell_pixels;
+  return Math.min(CELL_PIXELS_MAX, Math.max(CELL_PIXELS_MIN, n));
+}
+
+export function clampCellStep(value: number): number {
+  const n = Math.round(value);
+  if (!Number.isFinite(n)) return DEFAULT_SHELL.cell_step;
+  return Math.min(CELL_STEP_MAX, Math.max(CELL_STEP_MIN, n));
+}
+
 export function cellPixels(shell: ShellConfig): number {
-  return Math.min(256, Math.max(16, shell.cell_pixels || DEFAULT_SHELL.cell_pixels));
+  return clampCellPixels(shell.cell_pixels || DEFAULT_SHELL.cell_pixels);
 }

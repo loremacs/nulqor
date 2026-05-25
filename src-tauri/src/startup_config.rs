@@ -20,6 +20,14 @@ pub struct ShellConfig {
     pub snap_enabled: bool,
     #[serde(default = "default_true")]
     pub show_grid: bool,
+    #[serde(default = "default_true")]
+    pub click_through: bool,
+    #[serde(default = "default_false")]
+    pub always_on_top: bool,
+}
+
+fn default_false() -> bool {
+    false
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -43,6 +51,8 @@ struct ShellToml {
     cell_pixels: Option<u32>,
     snap_enabled: Option<bool>,
     show_grid: Option<bool>,
+    click_through: Option<bool>,
+    always_on_top: Option<bool>,
 }
 
 fn default_cell_pixels() -> u32 {
@@ -59,6 +69,8 @@ impl Default for ShellConfig {
             cell_pixels: default_cell_pixels(),
             snap_enabled: true,
             show_grid: true,
+            click_through: true,
+            always_on_top: false,
         }
     }
 }
@@ -81,6 +93,8 @@ fn parse_shell(raw: Option<ShellToml>) -> ShellConfig {
         cell_pixels: raw.cell_pixels.unwrap_or_else(default_cell_pixels),
         snap_enabled: raw.snap_enabled.unwrap_or(true),
         show_grid: raw.show_grid.unwrap_or(true),
+        click_through: raw.click_through.unwrap_or(true),
+        always_on_top: raw.always_on_top.unwrap_or(false),
     }
 }
 
@@ -241,6 +255,8 @@ min-core = "0.1.0"
             cell_pixels: Some(48),
             snap_enabled: None,
             show_grid: None,
+            click_through: None,
+            always_on_top: None,
         }));
         assert_eq!(shell.cell_pixels, 48);
     }

@@ -30,6 +30,7 @@ mod ipc;
 mod loader;
 mod permission;
 mod runtime;
+mod shell_cursor;
 mod startup_config;
 mod types;
 mod version;
@@ -160,7 +161,11 @@ pub fn run() {
             app.manage(AppState::new(ctx));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![ipc::core_invoke, ipc::core_list_commands,])
+        .invoke_handler(tauri::generate_handler![
+            ipc::core_invoke,
+            ipc::core_list_commands,
+            shell_cursor::shell_cursor_client,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Nulqor");
 }

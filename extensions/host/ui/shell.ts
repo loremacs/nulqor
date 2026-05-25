@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import {
@@ -10,12 +9,20 @@ import {
   pointerToGridCell,
   snapTileFromPointer,
   tileDisplayRect,
+  tileFromWindowRect,
   tileSnapRect,
+  tileWindowRect,
   updateGridGeometry,
   type GridMetrics,
 } from "./grid";
+import { mountClickThrough } from "./click-through";
+import { mountMenuDockPreview } from "./menu-dock-preview";
 import { isPanelResizable, mountPanel, registeredPanelIds } from "./panels";
 import {
+  CELL_PIXELS_MAX,
+  CELL_STEP_MAX,
+  clampCellPixels,
+  clampCellStep,
   DEFAULT_SHELL,
   STORAGE_KEY,
   type CanvasConfig,
@@ -26,11 +33,25 @@ import {
   type WindowFrameState,
 } from "./types";
 import { captureWindowFrame, DEFAULT_WINDOWED_FRAME } from "./window-frame";
+import { mountWindowChrome } from "./window-chrome";
 
 const DEFAULT_TILE_COLS = 4;
 const DEFAULT_TILE_ROWS = 3;
 const MIN_TILE_COLS = 1;
 const MIN_TILE_ROWS = 1;
+
+type ShellToggleKey =
+  | "snap_enabled"
+  | "show_grid"
+  | "click_through"
+  | "always_on_top";
+
+const SHELL_TOGGLE_KEYS: ShellToggleKey[] = [
+  "snap_enabled",
+  "show_grid",
+  "click_through",
+  "always_on_top",
+];
 
 function defaultTile(
   id: string,
@@ -54,13 +75,17 @@ function loadPersisted(): PersistedShellState | null {
       shell?: ShellConfig & { grid_size?: number; grid_cols?: number };
     };
     if (parsed.shell) {
-      parsed.shell.cell_pixels = Math.min(
-        256,
-        Math.max(16, Number(parsed.shell.cell_pixels) || DEFAULT_SHELL.cell_pixels),
+      parsed.shell.cell_pixels = clampCellPixels(
+        Number(parsed.shell.cell_pixels) || DEFAULT_SHELL.cell_pixels,
+      );
+      parsed.shell.cell_step = clampCellStep(
+        Number(parsed.shell.cell_step) || DEFAULT_SHELL.cell_step,
       );
     }
     if (!parsed.panelLayouts && parsed.tiles) {
-      parsed.panelLayouts = Object.fromEntries(parsed.tiles.map((t) => [t.id, t]));
+      parsed.panelLayouts = Object.fromEntries(
+        parsed.tiles.map((t) => [t.id, t]),
+      );
       parsed.openPanelIds = parsed.tiles.map((t) => t.id);
     }
     return parsed;
@@ -71,6 +96,125 @@ function loadPersisted(): PersistedShellState | null {
 
 function savePersisted(state: PersistedShellState): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+type BoundedNumericInputOptions = {
+  input: HTMLInputElement;
+  min: number;
+  max: number;
+  getCurrent: () => number;
+  arrowStep: () => number;
+  onCommit: (value: number) => void;
+};
+
+function wireBoundedNumericInput(opts: BoundedNumericInputOptions): () => void {
+  const { input, min, max, getCurrent, arrowStep, onCommit } = opts;
+
+  const clamp = (value: number): number => {
+    const n = Math.round(value);
+    if (!Number.isFinite(n)) return getCurrent();
+    return Math.min(max, Math.max(min, n));
+  };
+
+  const commit = (): void => {
+    const digits = input.value.replace(/\D/g, "");
+    const next = clamp(digits === "" ? getCurrent() : Number(digits));
+    input.value = String(next);
+    onCommit(next);
+  };
+
+  let spinBase: number | null = null;
+
+  input.addEventListener("mousedown", (event) => {
+    const rect = input.getBoundingClientRect();
+    if (event.clientX - rect.left > rect.width - 20) {
+      const digits = input.value.replace(/\D/g, "");
+      spinBase = clamp(digits === "" ? getCurrent() : Number(digits));
+    }
+  });
+
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      commit();
+      input.blur();
+      return;
+    }
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      const digits = input.value.replace(/\D/g, "");
+      const base = clamp(digits === "" ? getCurrent() : Number(digits));
+      const step = arrowStep();
+      const delta = event.key === "ArrowUp" ? step : -step;
+      const next = clamp(base + delta);
+      input.value = String(next);
+      onCommit(next);
+      return;
+    }
+    if (
+      event.key === "e" ||
+      event.key === "E" ||
+      event.key === "+" ||
+      event.key === "-" ||
+      event.key === "." ||
+      event.key === ","
+    ) {
+      event.preventDefault();
+      return;
+    }
+    const allowed = [
+      "Backspace",
+      "Delete",
+      "Tab",
+      "Escape",
+      "Enter",
+      "ArrowLeft",
+      "ArrowRight",
+      "Home",
+      "End",
+    ];
+    if (allowed.includes(event.key) || event.ctrlKey || event.metaKey) return;
+    if (/^\d$/.test(event.key)) return;
+    event.preventDefault();
+  });
+
+  input.addEventListener("input", () => {
+    if (spinBase !== null) {
+      const curr = Number(input.value);
+      const step = arrowStep();
+      if (Number.isFinite(curr) && Math.abs(curr - spinBase) === 1) {
+        const next = clamp(spinBase + (curr > spinBase ? step : -step));
+        input.value = String(next);
+        onCommit(next);
+        spinBase = null;
+        return;
+      }
+      spinBase = null;
+    }
+
+    const digits = input.value.replace(/\D/g, "");
+    if (digits !== input.value) {
+      input.value = digits;
+    }
+    if (digits !== "" && Number(digits) > max) {
+      input.value = String(max);
+    }
+  });
+
+  input.addEventListener("paste", (event) => {
+    event.preventDefault();
+    const text = event.clipboardData?.getData("text").replace(/\D/g, "") ?? "";
+    if (text === "") return;
+    input.value = String(clamp(Number(text)));
+  });
+
+  input.addEventListener("blur", () => {
+    spinBase = null;
+    commit();
+  });
+
+  return () => {
+    input.value = String(clamp(getCurrent()));
+  };
 }
 
 async function fetchCanvasConfig(): Promise<CanvasConfig> {
@@ -88,6 +232,13 @@ function applyShellCss(root: HTMLElement, shell: ShellConfig): void {
 function setDropdownOpen(panel: HTMLElement, open: boolean): void {
   panel.hidden = !open;
   panel.classList.toggle("is-open", open);
+}
+
+function syncMenuCheckRow(row: HTMLElement, checked: boolean): void {
+  row.setAttribute("aria-checked", String(checked));
+  row.classList.toggle("is-checked", checked);
+  const check = row.querySelector<HTMLElement>(".menu-dropdown-check");
+  if (check) check.textContent = checked ? "✓" : "";
 }
 
 function clampTile(tile: TileLayout, metrics: GridMetrics): TileLayout {
@@ -113,7 +264,8 @@ function applyTileToElement(
 ): void {
   clearTilePositionStyle(el);
   const rect = tileDisplayRect(tile, metrics, shell.snap_enabled);
-  const isFree = !shell.snap_enabled && tile.freeX !== undefined && tile.freeY !== undefined;
+  const isFree =
+    !shell.snap_enabled && tile.freeX !== undefined && tile.freeY !== undefined;
   el.classList.add(isFree ? "panel-tile-free" : "panel-tile-snap");
   el.style.position = "absolute";
   el.style.left = `${rect.left}px`;
@@ -138,57 +290,6 @@ function trackPointerSession(
   document.addEventListener("pointercancel", end);
 }
 
-function isMenuDragBlocked(target: HTMLElement): boolean {
-  return Boolean(
-    target.closest(".menu-btn, .menu-window-btn, .menu-window-controls, .menu-dropdown, input, label"),
-  );
-}
-
-const MENU_BAR_DRAG_PX = 5;
-
-/**
- * Defer drag until the pointer moves so dblclick is not suppressed by preventDefault.
- * Windowed: startDragging after threshold. Fullscreen: re-dock menu on release after threshold.
- */
-function trackMenuBarDrag(
-  pointerDown: PointerEvent,
-  windowMode: "fullscreen" | "windowed",
-  onDock: (event: PointerEvent) => void,
-): void {
-  const originX = pointerDown.clientX;
-  const originY = pointerDown.clientY;
-  let dragging = false;
-
-  const cleanup = (): void => {
-    document.removeEventListener("pointermove", onMove);
-    document.removeEventListener("pointerup", onUp);
-    document.removeEventListener("pointercancel", onUp);
-  };
-
-  const onMove = (event: PointerEvent): void => {
-    if (dragging) return;
-    const dx = event.clientX - originX;
-    const dy = event.clientY - originY;
-    if (Math.hypot(dx, dy) < MENU_BAR_DRAG_PX) return;
-    dragging = true;
-    if (windowMode === "windowed") {
-      cleanup();
-      void getCurrentWindow().startDragging();
-    }
-  };
-
-  const onUp = (event: PointerEvent): void => {
-    if (dragging && windowMode === "fullscreen") {
-      onDock(event);
-    }
-    cleanup();
-  };
-
-  document.addEventListener("pointermove", onMove);
-  document.addEventListener("pointerup", onUp);
-  document.addEventListener("pointercancel", onUp);
-}
-
 export async function initShell(): Promise<void> {
   const app = document.getElementById("app");
   if (!app) throw new Error("#app not found");
@@ -198,38 +299,78 @@ export async function initShell(): Promise<void> {
 
   let shell: ShellConfig = { ...DEFAULT_SHELL, ...canvasConfig.shell };
   if (persisted?.shell) shell = { ...shell, ...persisted.shell };
+  shell.cell_pixels = clampCellPixels(shell.cell_pixels);
+  shell.cell_step = clampCellStep(shell.cell_step);
 
-  const panelLayouts: Record<string, TileLayout> = { ...persisted?.panelLayouts };
+  const panelLayouts: Record<string, TileLayout> = {
+    ...persisted?.panelLayouts,
+  };
   let openPanelIds: string[] =
-    persisted?.openPanelIds?.filter((id) => panelLayouts[id] || canvasConfig.open_panels.includes(id)) ??
-    [];
+    persisted?.openPanelIds?.filter(
+      (id) => panelLayouts[id] || canvasConfig.open_panels.includes(id),
+    ) ?? [];
 
   if (openPanelIds.length === 0) {
     openPanelIds = [...canvasConfig.open_panels];
   }
 
   let menuDock: MenuDock = persisted?.menuDock ?? "top";
-  let windowMode: "fullscreen" | "windowed" = persisted?.windowFrame?.mode ?? "fullscreen";
+  let windowMode: "fullscreen" | "windowed" =
+    persisted?.windowFrame?.mode ?? "fullscreen";
   let windowFrame: WindowFrameState =
     persisted?.windowFrame ??
-    (windowMode === "windowed" ? { ...DEFAULT_WINDOWED_FRAME } : { mode: "fullscreen", width: 1280, height: 720, x: 0, y: 0 });
+    (windowMode === "windowed"
+      ? { ...DEFAULT_WINDOWED_FRAME }
+      : { mode: "fullscreen", width: 1280, height: 720, x: 0, y: 0 });
 
   app.innerHTML = `
     <div class="nulqor-shell" data-menu-dock="${menuDock}">
       <header class="menu-bar" data-interactive data-dock="${menuDock}">
-        <div class="menu-bar-brand" title="Drag to move menu bar">Nulqor</div>
-        <nav class="menu-bar-items" data-interactive>
+        <div class="menu-bar-drag" title="Drag to move menu bar">
+          <img class="menu-bar-icon" src="/extensions/host/ui/assets/nulqor-mark.svg" width="16" height="16" alt="" draggable="false" />
+        </div>
+        <nav class="menu-bar-menus" data-interactive>
           <div class="menu-group">
-            <button type="button" class="menu-btn" data-menu="settings">Settings</button>
-            <div class="menu-dropdown" data-panel="settings" hidden>
-              <label>Cell size (px) <input type="number" min="16" max="256" data-setting="cell_pixels" /></label>
-              <label><input type="checkbox" data-setting="snap_enabled" /> Snap to grid</label>
-              <label><input type="checkbox" data-setting="show_grid" /> Show grid lines</label>
+            <button type="button" class="menu-item" data-menu="settings" title="Settings" aria-label="Settings">
+              <img class="menu-item-icon" src="/extensions/host/ui/assets/icon-settings.svg" width="16" height="16" alt="" draggable="false" />
+              <span class="menu-item-label">Settings</span>
+            </button>
+            <div class="menu-dropdown" data-panel="settings" hidden role="menu">
+              <label class="menu-dropdown-row menu-dropdown-row-value menu-dropdown-row-sizes">
+                <span class="menu-dropdown-gutter" aria-hidden="true"></span>
+                <span class="menu-dropdown-text">Cell Size</span>
+                <div class="menu-dropdown-values">
+                  <input type="number" class="menu-dropdown-value" min="1" max="256" step="any" inputmode="numeric" data-setting="cell_pixels" aria-label="Cell size" />
+                  <span class="menu-dropdown-inline-label">Step</span>
+                  <input type="number" class="menu-dropdown-value" min="1" max="256" step="any" inputmode="numeric" data-setting="cell_step" aria-label="Cell size step" />
+                </div>
+              </label>
+              <div class="menu-dropdown-separator" role="separator"></div>
+              <button type="button" class="menu-dropdown-row menu-dropdown-row-check" data-setting="snap_enabled" role="menuitemcheckbox" aria-checked="false">
+                <span class="menu-dropdown-gutter menu-dropdown-check" aria-hidden="true"></span>
+                <span class="menu-dropdown-text">Snap to Grid</span>
+              </button>
+              <button type="button" class="menu-dropdown-row menu-dropdown-row-check" data-setting="show_grid" role="menuitemcheckbox" aria-checked="false">
+                <span class="menu-dropdown-gutter menu-dropdown-check" aria-hidden="true"></span>
+                <span class="menu-dropdown-text">Show Grid Lines</span>
+              </button>
+              <div class="menu-dropdown-separator" role="separator"></div>
+              <button type="button" class="menu-dropdown-row menu-dropdown-row-check" data-setting="click_through" role="menuitemcheckbox" aria-checked="false">
+                <span class="menu-dropdown-gutter menu-dropdown-check" aria-hidden="true"></span>
+                <span class="menu-dropdown-text">Click Through Desktop</span>
+              </button>
+              <button type="button" class="menu-dropdown-row menu-dropdown-row-check" data-setting="always_on_top" role="menuitemcheckbox" aria-checked="false">
+                <span class="menu-dropdown-gutter menu-dropdown-check" aria-hidden="true"></span>
+                <span class="menu-dropdown-text">Always on Top</span>
+              </button>
             </div>
           </div>
           <div class="menu-group">
-            <button type="button" class="menu-btn" data-menu="apps">Apps</button>
-            <div class="menu-dropdown" data-panel="apps" hidden></div>
+            <button type="button" class="menu-item" data-menu="apps" title="Apps" aria-label="Apps">
+              <img class="menu-item-icon" src="/extensions/host/ui/assets/icon-apps.svg" width="16" height="16" alt="" draggable="false" />
+              <span class="menu-item-label">Apps</span>
+            </button>
+            <div class="menu-dropdown" data-panel="apps" hidden role="menu"></div>
           </div>
         </nav>
         <div class="menu-bar-spacer"></div>
@@ -246,7 +387,9 @@ export async function initShell(): Promise<void> {
   const shellRoot = app.querySelector<HTMLElement>(".nulqor-shell")!;
   const menuBar = app.querySelector<HTMLElement>(".menu-bar")!;
   const desktop = app.querySelector<HTMLElement>(".desktop-grid")!;
-  const settingsPanel = app.querySelector<HTMLElement>('[data-panel="settings"]')!;
+  const settingsPanel = app.querySelector<HTMLElement>(
+    '[data-panel="settings"]',
+  )!;
   const appsPanel = app.querySelector<HTMLElement>('[data-panel="apps"]')!;
 
   let gridMetrics: GridMetrics;
@@ -255,7 +398,9 @@ export async function initShell(): Promise<void> {
     gridMetrics = updateGridGeometry(shellRoot, desktop, shell);
   };
 
-  const setMenuDock = (dock: MenuDock): void => {
+  let setMenuDock: (dock: MenuDock) => void;
+
+  setMenuDock = (dock: MenuDock): void => {
     menuDock = dock;
     menuBar.dataset.dock = dock;
     shellRoot.dataset.menuDock = dock;
@@ -266,6 +411,22 @@ export async function initShell(): Promise<void> {
   applyShellCss(shellRoot, shell);
   setMenuDock(menuDock);
 
+  const clickThrough = mountClickThrough(shell.click_through);
+  const menuDockPreview = mountMenuDockPreview(shellRoot);
+  const syncClickThrough = (): void => {
+    clickThrough.refresh();
+  };
+
+  const applyAlwaysOnTop = async (on: boolean): Promise<void> => {
+    try {
+      await getCurrentWindow().setAlwaysOnTop(on);
+    } catch (err) {
+      console.warn("[host] setAlwaysOnTop failed:", err);
+    }
+  };
+
+  void applyAlwaysOnTop(shell.always_on_top);
+
   let tiles: TileLayout[] = openPanelIds.map((id, i) =>
     clampTile(panelLayouts[id] ?? defaultTile(id, i, gridMetrics), gridMetrics),
   );
@@ -273,9 +434,50 @@ export async function initShell(): Promise<void> {
     panelLayouts[t.id] = t;
   });
 
+  setMenuDock = (dock: MenuDock): void => {
+    if (dock === menuDock) return;
+
+    menuDockPreview.hide();
+
+    const prevDesktop = desktop.getBoundingClientRect();
+    const windowRects = tiles.map((t) =>
+      tileWindowRect(t, gridMetrics, shell.snap_enabled, prevDesktop),
+    );
+
+    menuDock = dock;
+    menuBar.dataset.dock = dock;
+    shellRoot.dataset.menuDock = dock;
+    applyMenuLayout(shellRoot, dock);
+    refreshGrid();
+
+    const nextDesktop = desktop.getBoundingClientRect();
+    tiles = windowRects.map((rect, i) =>
+      tileFromWindowRect(
+        rect,
+        nextDesktop,
+        gridMetrics,
+        tiles[i],
+        shell.snap_enabled,
+      ),
+    );
+    tiles.forEach((t) => {
+      panelLayouts[t.id] = t;
+    });
+    void renderTiles();
+    syncClickThrough();
+    menuBar.style.transform = "translateZ(0)";
+    requestAnimationFrame(() => {
+      menuBar.style.transform = "";
+    });
+    void shellRoot.offsetHeight;
+  };
+
   const syncTilesFromLayouts = (): void => {
     tiles = openPanelIds.map((id, i) =>
-      clampTile(panelLayouts[id] ?? defaultTile(id, i, gridMetrics), gridMetrics),
+      clampTile(
+        panelLayouts[id] ?? defaultTile(id, i, gridMetrics),
+        gridMetrics,
+      ),
     );
   };
 
@@ -294,21 +496,29 @@ export async function initShell(): Promise<void> {
 
   const renderAppsMenu = (): void => {
     appsPanel.innerHTML = "";
+    if (canvasConfig.panels.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "menu-dropdown-row menu-dropdown-row-disabled";
+      empty.innerHTML =
+        '<span class="menu-dropdown-gutter" aria-hidden="true"></span><span class="menu-dropdown-text">No Panel extensions enabled.</span>';
+      appsPanel.append(empty);
+      return;
+    }
+
     for (const panel of canvasConfig.panels) {
       const open = openPanelIds.includes(panel.id);
       const hasLoader = registeredPanelIds().includes(panel.id);
-      const label = document.createElement("label");
-      label.className = "apps-item";
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.checked = open;
-      input.disabled = !hasLoader;
-      input.dataset.panelId = panel.id;
-      label.append(input, document.createTextNode(` ${panel.id}${hasLoader ? "" : " (restart only)"}`));
-      appsPanel.append(label);
-    }
-    if (canvasConfig.panels.length === 0) {
-      appsPanel.textContent = "No Panel extensions enabled.";
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "menu-dropdown-row menu-dropdown-row-check";
+      row.role = "menuitemcheckbox";
+      row.dataset.panelId = panel.id;
+      row.disabled = !hasLoader;
+      row.innerHTML =
+        '<span class="menu-dropdown-gutter menu-dropdown-check" aria-hidden="true"></span>' +
+        `<span class="menu-dropdown-text">${panel.id}${hasLoader ? "" : " (restart only)"}</span>`;
+      syncMenuCheckRow(row, open);
+      appsPanel.append(row);
     }
   };
 
@@ -321,7 +531,9 @@ export async function initShell(): Promise<void> {
   const renderTiles = async (): Promise<void> => {
     removeClosedTiles();
     for (const tile of tiles) {
-      let el = desktop.querySelector<HTMLElement>(`[data-panel-id="${tile.id}"]`);
+      let el = desktop.querySelector<HTMLElement>(
+        `[data-panel-id="${tile.id}"]`,
+      );
       if (!el) {
         el = document.createElement("article");
         el.className = "panel-tile";
@@ -354,48 +566,51 @@ export async function initShell(): Promise<void> {
       applyTileToElement(el, tile, shell, gridMetrics);
     }
     persist();
+    syncClickThrough();
+  };
+
+  const cellPixelsInput = settingsPanel.querySelector<HTMLInputElement>(
+    '[data-setting="cell_pixels"]',
+  )!;
+  const cellStepInput = settingsPanel.querySelector<HTMLInputElement>(
+    '[data-setting="cell_step"]',
+  )!;
+
+  const syncCellSizeInputs = (): void => {
+    cellPixelsInput.value = String(clampCellPixels(shell.cell_pixels));
+    cellStepInput.value = String(clampCellStep(shell.cell_step));
   };
 
   const syncSettingsInputs = (): void => {
-    settingsPanel.querySelector<HTMLInputElement>('[data-setting="cell_pixels"]')!.value =
-      String(shell.cell_pixels);
-    settingsPanel.querySelector<HTMLInputElement>('[data-setting="snap_enabled"]')!.checked =
-      shell.snap_enabled;
-    settingsPanel.querySelector<HTMLInputElement>('[data-setting="show_grid"]')!.checked =
-      shell.show_grid;
+    syncCellSizeInputs();
+    for (const key of SHELL_TOGGLE_KEYS) {
+      const row = settingsPanel.querySelector<HTMLElement>(
+        `[data-setting="${key}"]`,
+      )!;
+      syncMenuCheckRow(row, shell[key]);
+    }
   };
 
-  syncSettingsInputs();
-  renderAppsMenu();
-  await renderTiles();
-
-  const closeDropdowns = (): void => {
-    setDropdownOpen(settingsPanel, false);
-    setDropdownOpen(appsPanel, false);
-  };
-
-  app.querySelector('[data-menu="settings"]')!.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const willOpen = settingsPanel.hidden;
-    closeDropdowns();
-    setDropdownOpen(settingsPanel, willOpen);
-  });
-
-  app.querySelector('[data-menu="apps"]')!.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const willOpen = appsPanel.hidden;
-    closeDropdowns();
-    setDropdownOpen(appsPanel, willOpen);
-  });
-
-  settingsPanel.addEventListener("change", (event) => {
-    const target = event.target as HTMLInputElement;
-    const key = target.dataset.setting as keyof ShellConfig | undefined;
-    if (!key) return;
-    if (key === "snap_enabled" || key === "show_grid") {
-      shell[key] = target.checked;
+  const applyWindowPref = (key: "click_through" | "always_on_top"): void => {
+    shell[key] = !shell[key];
+    syncSettingsInputs();
+    if (key === "click_through") {
+      clickThrough.setEnabled(shell.click_through);
+      syncClickThrough();
     } else {
-      shell[key] = Number(target.value);
+      void applyAlwaysOnTop(shell.always_on_top);
+    }
+    persist();
+  };
+
+  const applyShellSetting = (
+    key: "cell_pixels" | "snap_enabled" | "show_grid",
+    rawValue?: string | boolean,
+  ): void => {
+    if (key === "snap_enabled" || key === "show_grid") {
+      shell[key] = typeof rawValue === "boolean" ? rawValue : !shell[key];
+    } else {
+      shell.cell_pixels = clampCellPixels(Number(rawValue));
     }
     applyShellCss(shellRoot, shell);
     syncSettingsInputs();
@@ -404,24 +619,44 @@ export async function initShell(): Promise<void> {
     refreshGrid();
 
     if (key === "cell_pixels") {
-      tiles = tiles.map((t) => lockTilePixels(t, prevMetrics, shell.snap_enabled));
+      tiles = tiles.map((t) =>
+        lockTilePixels(t, prevMetrics, shell.snap_enabled),
+      );
     } else if (shell.snap_enabled) {
       tiles = tiles.map((t) => {
         if (t.freeX !== undefined && t.freeY !== undefined) {
           const origin = desktop.getBoundingClientRect();
-          const cell = pointerToGridCell(origin.left + t.freeX, origin.top + t.freeY, desktop, gridMetrics);
+          const cell = pointerToGridCell(
+            origin.left + t.freeX,
+            origin.top + t.freeY,
+            desktop,
+            gridMetrics,
+          );
           return clampTile(
-            { ...t, col: cell.col, row: cell.row, freeX: undefined, freeY: undefined },
+            {
+              ...t,
+              col: cell.col,
+              row: cell.row,
+              freeX: undefined,
+              freeY: undefined,
+            },
             gridMetrics,
           );
         }
-        return clampTile({ ...t, freeX: undefined, freeY: undefined }, gridMetrics);
+        return clampTile(
+          { ...t, freeX: undefined, freeY: undefined },
+          gridMetrics,
+        );
       });
     } else {
       tiles = tiles.map((t) => {
-        if (t.freeX !== undefined && t.freeY !== undefined) return clampTile(t, gridMetrics);
+        if (t.freeX !== undefined && t.freeY !== undefined)
+          return clampTile(t, gridMetrics);
         const rect = tileSnapRect(t, gridMetrics);
-        return clampTile({ ...t, freeX: rect.left, freeY: rect.top }, gridMetrics);
+        return clampTile(
+          { ...t, freeX: rect.left, freeY: rect.top },
+          gridMetrics,
+        );
       });
     }
 
@@ -429,110 +664,137 @@ export async function initShell(): Promise<void> {
       panelLayouts[t.id] = t;
     });
     void renderTiles();
-  });
-
-  const restoreBtn = app.querySelector<HTMLButtonElement>('[data-action="restore"]')!;
-
-  const syncWindowMode = async (): Promise<void> => {
-    const win = getCurrentWindow();
-    const fullscreen = await win.isFullscreen();
-    windowMode = fullscreen ? "fullscreen" : "windowed";
-    shellRoot.dataset.windowMode = windowMode;
-    restoreBtn.title = fullscreen ? "Restore down" : "Maximize";
-    restoreBtn.textContent = fullscreen ? "❐" : "□";
-    const brand = menuBar.querySelector<HTMLElement>(".menu-bar-brand")!;
-    brand.title = fullscreen
-      ? "Drag to move menu bar · double-click to restore"
-      : "Drag to move window · double-click for fullscreen";
   };
 
-  void syncWindowMode().catch((err) => {
-    console.warn("[host] syncWindowMode failed:", err);
-  });
-
-  app.querySelector('[data-action="minimize"]')!.addEventListener("click", () => {
-    void getCurrentWindow().minimize();
-  });
-
-  let togglingFullscreen = false;
-
-  const toggleWindowFullscreen = async (): Promise<void> => {
-    if (togglingFullscreen) return;
-    togglingFullscreen = true;
-    try {
-      const win = getCurrentWindow();
-      const fullscreen = await win.isFullscreen();
-      if (fullscreen) {
-        windowMode = "windowed";
-        const target = windowFrame.mode === "windowed" ? windowFrame : DEFAULT_WINDOWED_FRAME;
-        await win.setFullscreen(false);
-        await win.setResizable(true);
-        await win.setSize(new LogicalSize(target.width, target.height));
-        if (target.x < 0 || target.y < 0) {
-          await win.center();
-        } else {
-          await win.setPosition(new PhysicalPosition(target.x, target.y));
-        }
-      } else {
-        await refreshWindowFrame();
-        windowMode = "fullscreen";
-        await win.setFullscreen(true);
-        await win.setResizable(false);
+  wireBoundedNumericInput({
+    input: cellPixelsInput,
+    min: 1,
+    max: CELL_PIXELS_MAX,
+    getCurrent: () => shell.cell_pixels,
+    arrowStep: () => clampCellStep(shell.cell_step),
+    onCommit: (next) => {
+      cellPixelsInput.value = String(next);
+      if (next !== shell.cell_pixels) {
+        applyShellSetting("cell_pixels", String(next));
       }
-      await syncWindowMode();
-      await refreshWindowFrame();
-      refreshGrid();
-      void renderTiles();
-    } finally {
-      togglingFullscreen = false;
-    }
+    },
+  });
+
+  wireBoundedNumericInput({
+    input: cellStepInput,
+    min: 1,
+    max: CELL_STEP_MAX,
+    getCurrent: () => shell.cell_step,
+    arrowStep: () => 1,
+    onCommit: (next) => {
+      cellStepInput.value = String(next);
+      if (next !== shell.cell_step) {
+        shell.cell_step = next;
+        persist();
+        syncCellSizeInputs();
+      }
+    },
+  });
+
+  syncSettingsInputs();
+  renderAppsMenu();
+  await renderTiles();
+
+  const closeDropdowns = (): void => {
+    setDropdownOpen(settingsPanel, false);
+    setDropdownOpen(appsPanel, false);
+    syncClickThrough();
   };
 
-  restoreBtn.addEventListener("click", () => {
-    void toggleWindowFullscreen();
-  });
-
-  menuBar.addEventListener("dblclick", (event) => {
-    const target = event.target as HTMLElement;
-    if (isMenuDragBlocked(target)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    void toggleWindowFullscreen();
-  });
-
-  app.querySelector('[data-action="close"]')!.addEventListener("click", () => {
-    void getCurrentWindow().close();
-  });
-
-  void getCurrentWindow()
-    .onCloseRequested(async (event) => {
-      event.preventDefault();
-      await refreshWindowFrame();
-      await getCurrentWindow().destroy();
-    })
-    .catch((err) => {
-      console.warn("[host] onCloseRequested unavailable:", err);
+  app
+    .querySelector('[data-menu="settings"]')!
+    .addEventListener("click", (e) => {
+      e.stopPropagation();
+      const willOpen = settingsPanel.hidden;
+      closeDropdowns();
+      setDropdownOpen(settingsPanel, willOpen);
+      syncClickThrough();
     });
 
-  void getCurrentWindow()
-    .onMoved(() => {
-      if (windowMode === "windowed") void refreshWindowFrame();
-    })
-    .catch((err) => {
-      console.warn("[host] onMoved unavailable:", err);
-    });
+  app.querySelector('[data-menu="apps"]')!.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const willOpen = appsPanel.hidden;
+    closeDropdowns();
+    setDropdownOpen(appsPanel, willOpen);
+    syncClickThrough();
+  });
 
-  void getCurrentWindow()
-    .onResized(() => {
+  settingsPanel.addEventListener("change", (event) => {
+    const target = event.target as HTMLInputElement;
+    const key = target.dataset.setting;
+    if (key !== "cell_pixels" && key !== "cell_step") return;
+    target.blur();
+  });
+
+  settingsPanel.addEventListener("click", (event) => {
+    const row = (event.target as HTMLElement).closest<HTMLButtonElement>(
+      ".menu-dropdown-row-check",
+    );
+    if (!row?.dataset.setting) return;
+    const key = row.dataset.setting;
+    if (key === "click_through" || key === "always_on_top") {
+      applyWindowPref(key);
+      return;
+    }
+    if (key === "snap_enabled" || key === "show_grid") {
+      applyShellSetting(key);
+    }
+  });
+
+  const restoreBtn = app.querySelector<HTMLButtonElement>(
+    '[data-action="restore"]',
+  )!;
+
+  mountWindowChrome({
+    menuBar,
+    shellRoot,
+    restoreBtn,
+    getWindowFrame: () => windowFrame,
+    refreshWindowFrame,
+    onLayoutChanged: () => {
       refreshGrid();
       tiles = tiles.map((t) => clampTile(t, gridMetrics));
       void renderTiles();
-      void syncWindowMode();
-      if (windowMode === "windowed") void refreshWindowFrame();
-    })
-    .catch((err) => {
-      console.warn("[host] onResized unavailable:", err);
-    });
+      syncClickThrough();
+    },
+    onMenuDockDrag: (endEvent) => {
+      menuDockPreview.hide();
+      setMenuDock(nearestMenuDock(endEvent.clientX, endEvent.clientY));
+      persist();
+      syncClickThrough();
+    },
+    onMenuDockDragMove: (moveEvent) => {
+      menuDockPreview.updateFromPointer(moveEvent.clientX, moveEvent.clientY);
+    },
+    onMenuDockDragEnd: () => {
+      menuDockPreview.hide();
+    },
+    initialMode: windowMode,
+  });
+
+  menuBar.addEventListener("pointerdown", (event) => {
+    const target = event.target as HTMLElement;
+    if (
+      target.closest(
+        ".menu-item, .menu-window-btn, .menu-dropdown, .menu-dropdown-row",
+      )
+    )
+      return;
+    const resume = clickThrough.suspend();
+    const end = (): void => {
+      document.removeEventListener("pointerup", end);
+      document.removeEventListener("pointercancel", end);
+      resume();
+      syncClickThrough();
+    };
+    document.addEventListener("pointerup", end);
+    document.addEventListener("pointercancel", end);
+  });
 
   window.addEventListener("resize", () => {
     refreshGrid();
@@ -540,19 +802,25 @@ export async function initShell(): Promise<void> {
     void renderTiles();
   });
 
-  appsPanel.addEventListener("change", async (event) => {
-    const target = event.target as HTMLInputElement;
-    const panelId = target.dataset.panelId;
-    if (!panelId) return;
-    if (target.checked) {
-      if (!openPanelIds.includes(panelId)) {
-        openPanelIds.push(panelId);
-        if (!panelLayouts[panelId]) {
-          panelLayouts[panelId] = defaultTile(panelId, openPanelIds.length - 1, gridMetrics);
-        }
+  appsPanel.addEventListener("click", async (event) => {
+    const row = (event.target as HTMLElement).closest<HTMLButtonElement>(
+      ".menu-dropdown-row-check",
+    );
+    if (!row?.dataset.panelId || row.disabled) return;
+    const panelId = row.dataset.panelId;
+    const open = openPanelIds.includes(panelId);
+    if (!open) {
+      openPanelIds.push(panelId);
+      if (!panelLayouts[panelId]) {
+        panelLayouts[panelId] = defaultTile(
+          panelId,
+          openPanelIds.length - 1,
+          gridMetrics,
+        );
       }
     } else {
-      panelLayouts[panelId] = tiles.find((t) => t.id === panelId) ?? panelLayouts[panelId];
+      panelLayouts[panelId] =
+        tiles.find((t) => t.id === panelId) ?? panelLayouts[panelId];
       openPanelIds = openPanelIds.filter((id) => id !== panelId);
     }
     syncTilesFromLayouts();
@@ -563,25 +831,12 @@ export async function initShell(): Promise<void> {
   desktop.addEventListener("click", async (event) => {
     const closeId = (event.target as HTMLElement).dataset.close;
     if (!closeId) return;
-    panelLayouts[closeId] = tiles.find((t) => t.id === closeId) ?? panelLayouts[closeId];
+    panelLayouts[closeId] =
+      tiles.find((t) => t.id === closeId) ?? panelLayouts[closeId];
     openPanelIds = openPanelIds.filter((id) => id !== closeId);
     syncTilesFromLayouts();
     await renderTiles();
     renderAppsMenu();
-  });
-
-  menuBar.addEventListener("pointerdown", (event) => {
-    const target = event.target as HTMLElement;
-    if (isMenuDragBlocked(target)) return;
-
-    trackMenuBarDrag(
-      event,
-      windowMode,
-      (endEvent) => {
-        setMenuDock(nearestMenuDock(endEvent.clientX, endEvent.clientY));
-        persist();
-      },
-    );
   });
 
   let tileDrag: {
@@ -598,7 +853,10 @@ export async function initShell(): Promise<void> {
     return { left: rect.left, top: rect.top };
   };
 
-  const positionTileFromPointer = (clientX: number, clientY: number): TileLayout | null => {
+  const positionTileFromPointer = (
+    clientX: number,
+    clientY: number,
+  ): TileLayout | null => {
     if (!tileDrag) return null;
     const tile = tiles.find((t) => t.id === tileDrag!.id);
     if (!tile) return null;
@@ -637,7 +895,10 @@ export async function initShell(): Promise<void> {
     const endCell = pointerToGridCell(clientX, clientY, desktop, gridMetrics);
     const colSpan = Math.max(MIN_TILE_COLS, endCell.col - tile.col + 1);
     const rowSpan = Math.max(MIN_TILE_ROWS, endCell.row - tile.row + 1);
-    const next = clampTile({ ...tile, colSpan, rowSpan, pixelLock: undefined }, gridMetrics);
+    const next = clampTile(
+      { ...tile, colSpan, rowSpan, pixelLock: undefined },
+      gridMetrics,
+    );
     tiles = tiles.map((t) => (t.id === tileResize!.id ? next : t));
     applyTileToElement(tileResize.el, next, shell, gridMetrics);
     persist();
@@ -654,11 +915,14 @@ export async function initShell(): Promise<void> {
       if (!isPanelResizable(id)) return;
       tileResize = { id, el: tileEl };
       event.preventDefault();
+      const resumeClickThrough = clickThrough.suspend();
       trackPointerSession(
         (moveEvent) => applyResize(moveEvent.clientX, moveEvent.clientY),
         () => {
           tileResize = null;
           persist();
+          resumeClickThrough();
+          syncClickThrough();
         },
       );
       return;
@@ -676,22 +940,34 @@ export async function initShell(): Promise<void> {
       pointerOffsetY: event.clientY - tileRect.top,
     };
     event.preventDefault();
+    const resumeClickThrough = clickThrough.suspend();
     trackPointerSession(
       (moveEvent) => {
-        const next = positionTileFromPointer(moveEvent.clientX, moveEvent.clientY);
+        const next = positionTileFromPointer(
+          moveEvent.clientX,
+          moveEvent.clientY,
+        );
         if (next) applyTileToElement(tileDrag!.el, next, shell, gridMetrics);
       },
       (endEvent) => {
         const dragged = tiles.find((t) => t.id === tileDrag!.id);
         if (!dragged) {
           tileDrag = null;
+          resumeClickThrough();
+          syncClickThrough();
           return;
         }
         const topLeftX = endEvent.clientX - tileDrag!.pointerOffsetX;
         const topLeftY = endEvent.clientY - tileDrag!.pointerOffsetY;
         let resolved =
           shell.snap_enabled && dragged.pixelLock
-            ? snapTileFromPointer(dragged, topLeftX, topLeftY, desktop, gridMetrics)
+            ? snapTileFromPointer(
+                dragged,
+                topLeftX,
+                topLeftY,
+                desktop,
+                gridMetrics,
+              )
             : positionTileFromPointer(endEvent.clientX, endEvent.clientY);
         if (resolved) {
           tiles = tiles.map((t) => (t.id === tileDrag!.id ? resolved! : t));
@@ -699,6 +975,8 @@ export async function initShell(): Promise<void> {
         }
         tileDrag = null;
         persist();
+        resumeClickThrough();
+        syncClickThrough();
       },
     );
   });

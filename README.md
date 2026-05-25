@@ -2,7 +2,7 @@
 
 Local-first, extensible construction platform. Frozen Rust core + replaceable extensions.
 
-**Agents:** start at [`AGENTS.md`](AGENTS.md) — repo layout, boundaries, and index links.
+**Agents:** read [`README.md`](README.md) for commands, then [`AGENTS.md`](AGENTS.md) for layout, boundaries, and index links.
 
 **Humans:** product *why* → [`docs/GOAL.md`](docs/GOAL.md) · *how* → [`docs/DESIGN.md`](docs/DESIGN.md) · build order → [`docs/BUILD_PLAN.md`](docs/BUILD_PLAN.md) · current phase → [`docs/PHASES.md`](docs/PHASES.md)
 
@@ -30,10 +30,11 @@ open_panels = ["hello-world"]
 enabled_extensions = ["host", "hello-world"]
 
 [shell]
-grid_cols = 12
-grid_rows = 8
+cell_pixels = 64
 snap_enabled = true
 show_grid = true
+click_through = true
+always_on_top = false
 ```
 
 The host shell UI is always the window. Use **Apps** in the menu to open/close panel tiles live. Backend-only extensions still require restart.
@@ -46,7 +47,7 @@ cargo run --manifest-path tools/nulqor-lint/Cargo.toml -- extensions/
 ## Audit (after skill, layout, or extension changes)
 
 ```powershell
-skills/audit-skill/scripts/audit.ps1 -SkillPath skills/<name> -Quiet
+skills/audit-skill/scripts/audit.ps1 -SkillName <name> -Quiet
 skills/audit-project/scripts/audit.ps1 -Quiet
 ```
 
@@ -62,7 +63,7 @@ skills/create-extension/scripts/create.ps1 -Id <kebab-id> -Kind Service -Purpose
 skills/nulqor-communicate/scripts/chat.ps1 -Action send -Message "Hello"
 ```
 
-See [`skills/nulqor-communicate/skill.md`](skills/nulqor-communicate/skill.md) for HTTP, MCP, and WebSocket surfaces.
+See [`skills/nulqor-communicate/SKILL.md`](skills/nulqor-communicate/SKILL.md) for HTTP, MCP, and WebSocket surfaces.
 
 ## Repository map
 

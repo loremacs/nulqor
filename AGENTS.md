@@ -26,6 +26,13 @@ Each main content area has an `index.md` that lists what lives there. **Read the
 | [`README.md`](README.md) | Build commands, prerequisites, repo map |
 | [`nulqor.toml`](nulqor.toml) | Startup: `open_panels`, `enabled_extensions`, `[shell]` grid options |
 
+### How agents load context
+
+| Tool | Read order |
+|---|---|
+| **External** (any IDE/CLI) | [`README.md`](README.md) → this file → area `index.md` → matching [`skills/index.md`](skills/index.md) skill |
+| **In-app** (`context-editor`) | This file (persona) + all [`rules/`](rules/index.md) + compact skill index; full skill via `load_skill` |
+
 ---
 
 ## Layout contract (mechanically enforced)
@@ -50,7 +57,7 @@ Each main content area has an `index.md` that lists what lives there. **Read the
 
 | Area | Contract |
 |---|---|
-| `skills/<name>/` | `skill.md` or `SKILL.md` + entry in `skills/index.md` |
+| `skills/<name>/` | `SKILL.md` (frontmatter: `name`, `description`) + entry in `skills/index.md` |
 | `rules/` | `*.md` rule file + entry in `rules/index.md` |
 | `docs/` | Map in `docs/index.md`; decisions in `docs/decisions/` |
 | `archive/` | Read-only; never execute or treat as operational |
@@ -78,8 +85,9 @@ Each main content area has an `index.md` that lists what lives there. **Read the
 
 **ALWAYS**
 - Read `docs/PHASES.md` and `TASKS.md` before starting non-trivial work
-- Check [`skills/index.md`](skills/index.md) — if a skill matches the task, read its `SKILL.md` or `skill.md` first
-- To talk to a **running app** (HTTP/MCP chat), read [`skills/nulqor-communicate/skill.md`](skills/nulqor-communicate/skill.md) and run `scripts/chat.ps1`
+- Check [`skills/index.md`](skills/index.md) — if a skill matches the task, read its `SKILL.md` first
+- To talk to a **running app** (HTTP/MCP chat), read [`skills/nulqor-communicate/SKILL.md`](skills/nulqor-communicate/SKILL.md) and run `scripts/chat.ps1`
+- For code edits, read [`skills/edit-and-verify/SKILL.md`](skills/edit-and-verify/SKILL.md) and run the listed verifiers
 - Read the target area's `index.md` before adding or moving files there
 - Read any file before editing it — never edit from assumptions
 - State a brief plan before non-trivial edits; for trivial edits, proceed and state assumptions inline
@@ -87,7 +95,8 @@ Each main content area has an `index.md` that lists what lives there. **Read the
 - Update `docs/DESIGN.md`, `docs/PHASES.md`, or `docs/decisions/` when the change affects them
 - Update [`docs/PROJECT_FEATURES.md`](docs/PROJECT_FEATURES.md) when shipping a feature
 - Run `skills/create-extension/scripts/create.ps1` when adding a new extension
-- Run `skills/audit-skill/scripts/audit.ps1 -Quiet` after any skill change
+- Run `skills/create-skill/scripts/create.ps1` when adding a new skill (or follow `skills/create-skill/SKILL.md`)
+- Run `skills/audit-skill/scripts/audit.ps1 -SkillName <name> -Quiet` after any skill change
 - Run `skills/audit-project/scripts/audit.ps1 -Quiet` after any file move, rename, restructure, or new extension
 - Report clearly when a command fails — never invent success
 - Determine state before interacting — never assume OS, tool, app, or runtime versions; check first, then act
@@ -100,7 +109,9 @@ Each main content area has an `index.md` that lists what lives there. **Read the
 - [`docs/PROJECT_FEATURES.md`](docs/PROJECT_FEATURES.md) — shipped feature record
 - [`extensions/index.md`](extensions/index.md) — runtime extensions and manifests
 - [`skills/index.md`](skills/index.md) — reusable agent workflows
-- [`skills/nulqor-communicate/skill.md`](skills/nulqor-communicate/skill.md) — HTTP/MCP chat with running app
+- [`skills/nulqor-communicate/SKILL.md`](skills/nulqor-communicate/SKILL.md) — HTTP/MCP chat with running app
+- [`skills/edit-and-verify/SKILL.md`](skills/edit-and-verify/SKILL.md) — edit code and run verifiers
+- [`skills/create-skill/SKILL.md`](skills/create-skill/SKILL.md) — scaffold new skills under `skills/`
 - [`rules/index.md`](rules/index.md) — context rules injected at runtime
 - [`tools/index.md`](tools/index.md) — linter and dev utilities
 - [`archive/index.md`](archive/index.md) — superseded material

@@ -1,41 +1,60 @@
-# audit-project
+---
+name: audit-project
+description: Verify repo layout, extension colocation, registry sync, and run nulqor-lint. Use after file moves, restructures, or new extensions.
+---
 
-**Type:** Skill  
-**Status:** Active
+## Metadata
 
-## Purpose
+```text
+version:       1.0.0
+topics:        meta, audit, layout, extensions, lint
+platform:      all
+script_policy: required
+scope:         project-scoped
+```
 
-Verify file structure integrity after any file move, rename, restructure, or new extension.
-Checks extension colocation, forbidden legacy paths, index/mod.rs/lib.rs sync, and runs `nulqor-lint`.
+Layout integrity audit for the Nulqor repo. Companion to `audit-skill` (skills tree only).
+
+---
+
+## When to use
+
+- After any file move, rename, or directory restructure.
+- After scaffolding or editing an extension.
+- Before merging layout-sensitive changes.
+
+Do not use for skill-format lint — run `audit-skill` instead.
+
+---
 
 ## Contract
 
-```yaml
-name: audit-project
-version: 0.2.0
-inputs:
-  - root: repo root path (defaults to current directory)
-  - skip_lint: optional, skip nulqor-lint invocation
-outputs:
-  - result: pass | fail
-  - errors: list of integrity errors (empty on pass)
-tool_loop_cap: 5
+```text
+when:         After layout, extension, or index changes in the repo
+inputs:       root -- repo root (default .); skip_lint -- optional
+outputs:      pass | fail with FAIL: lines listing violations
+side-effects: none — read-only
+validation:   scripts/audit.ps1 exits 0; no FAIL lines in output
 ```
 
-## Checks performed
+---
 
-- Required top-level dirs and area `index.md` files
-- Forbidden: `src-tauri/src/ext_*.rs`, root `src/*.{ts,tsx,css}` (except `src/README.md`)
-- Each `extensions/<id>/`: `extension.toml`, `src/lib.rs`, `README.md`; `ui/` for Panel kind
-- Sync: disk extensions ↔ `extensions/index.md` ↔ `mod.rs` `#[path]` ↔ `lib.rs` `loader.register`
-- `nulqor-lint` on `extensions/` (unless `-SkipLint`)
+## Steps
 
-## Usage
+1. From repo root, run `scripts/audit.ps1` or `scripts/audit.sh`:
 
-Run after any file move, rename, restructure, or new extension:
+   ```powershell
+   skills/audit-project/scripts/audit.ps1 [-Root <path>] [-Quiet] [-SkipLint]
+   ```
 
-```powershell
-skills/audit-project/scripts/audit.ps1 [-Root <path>] [-Quiet] [-SkipLint]
-```
+2. Fix every `FAIL:` line. Re-run until exit code 0.
 
-`-Quiet` suppresses output on pass; always prints `FAIL:` lines on failure.
+**Checks:** top-level dirs and indexes; forbidden legacy paths; extension colocation;
+registry sync (disk ↔ `extensions/index.md` ↔ `mod.rs` ↔ `lib.rs`); `nulqor-lint`.
+
+---
+
+## Verification
+
+- [ ] `audit.ps1` ran from intended repo root.
+- [ ] Exit code 0 and no `FAIL:` lines.

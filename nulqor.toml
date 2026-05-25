@@ -12,6 +12,8 @@ enabled_extensions = [
 cell_pixels = 64
 snap_enabled = true
 show_grid = true
+click_through = true
+always_on_top = false
 
 # Full AI harness (swap enabled_extensions; add panels via Apps menu or open_panels):
 # open_panels = ["chat-panel"]

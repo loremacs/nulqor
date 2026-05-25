@@ -10,6 +10,7 @@ Read this index before adding or editing rules. Keep entries in sync when rules 
 | Rule file | Purpose |
 |---|---|
 | `current-date.md` | Injects `{{current_datetime}}` so the Subject model can answer temporal questions |
+| `stack-and-tooling.md` | Stack pins, verify commands, and code-location invariants for self-editing agents |
 
 ## Adding a Rule
 
