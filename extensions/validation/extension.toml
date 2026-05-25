@@ -1,0 +1,16 @@
+[extension]
+id             = "validation"
+version        = "0.1.0"
+kind           = "Service"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+requires       = []
+
+[[commands]]
+id            = "validation:check@1"
+owner         = "validation"
+input-schema  = '{ "type": "string", "actual": "string", "expected": "string?" }'
+output-schema = '{ "pass": "boolean", "reason": "string" }'
+callable-by   = ["panel", "agent", "service"]
+permission    = "read"

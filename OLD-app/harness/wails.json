@@ -1,0 +1,10 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "harness",
+  "outputfilename": "harness",
+  "wailsjsdir": "./frontend",
+  "author": {
+    "name": "expar76",
+    "email": "expar76@gmail.com"
+  }
+}

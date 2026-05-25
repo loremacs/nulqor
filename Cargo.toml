@@ -1,0 +1,3 @@
+[workspace]
+members = ["src-tauri", "tools/nulqor-lint", "tools/mcp-server"]
+resolver = "2"

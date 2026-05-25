@@ -1,0 +1,46 @@
+[extension]
+id             = "provider-lmstudio"
+version        = "0.1.0"
+kind           = "Provider"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+http-hosts     = ["localhost"]
+
+[[provides]]
+capability = "provider"
+instance   = "lmstudio"
+contract   = "provider@1"
+
+[[commands]]
+id           = "provider:connect@1"
+owner        = "provider-lmstudio"
+permission   = "read"
+input-schema  = '{ "url": "string" }'
+output-schema = '{ "ok": "boolean", "model_count": "number", "models": "array" }'
+
+[[commands]]
+id           = "provider:models@1"
+owner        = "provider-lmstudio"
+permission   = "read"
+output-schema = '{ "models": "array", "active": "string|null" }'
+
+[[commands]]
+id           = "provider:generate@1"
+owner        = "provider-lmstudio"
+permission   = "write"
+callable-by  = ["panel", "agent", "service"]
+input-schema  = '{ "messages": "array", "model": "string?", "agent": "string?", "system_prompt": "string?", "temperature": "number?", "max_tokens": "number?" }'
+output-schema = '{ "stream_id": "string" }'
+
+[[publishes]]
+id = "provider:stream-start@1"
+
+[[publishes]]
+id = "provider:stream-delta@1"
+
+[[publishes]]
+id = "provider:stream-done@1"
+
+[[publishes]]
+id = "provider:stream-error@1"

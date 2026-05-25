@@ -1,0 +1,38 @@
+[extension]
+id             = "transcript"
+version        = "0.1.0"
+kind           = "Service"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+requires       = ["provider-lmstudio"]
+
+[[commands]]
+id           = "transcript:get@1"
+owner        = "transcript"
+permission   = "read"
+output-schema = '{ "messages": "array", "transcript_hash": "string" }'
+
+[[commands]]
+id           = "transcript:add-user-message@1"
+owner        = "transcript"
+permission   = "write"
+input-schema  = '{ "content": "string", "observer_name": "string" }'
+output-schema = '{ "id": "string" }'
+
+[[commands]]
+id           = "transcript:clear@1"
+owner        = "transcript"
+permission   = "destructive"
+output-schema = '{ "cleared": "number" }'
+
+[[commands]]
+id           = "transcript:set-active-agent@1"
+owner        = "transcript"
+permission   = "write"
+input-schema  = '{ "agent": "string" }'
+output-schema = '{ "ok": "boolean" }'
+
+[[subscribes]]
+namespace = "provider"
+name      = "stream-done"

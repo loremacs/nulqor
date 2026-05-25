@@ -1,0 +1,30 @@
+[extension]
+id             = "http-api"
+version        = "0.1.0"
+kind           = "Service"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+requires       = ["transcript", "provider-lmstudio"]
+
+[[commands]]
+id           = "http-api:status@1"
+owner        = "http-api"
+permission   = "read"
+output-schema = '{ "running": "boolean", "port": "number" }'
+
+[[subscribes]]
+namespace = "transcript"
+name      = "message-added"
+
+[[subscribes]]
+namespace = "provider"
+name      = "stream-start"
+
+[[subscribes]]
+namespace = "provider"
+name      = "stream-delta"
+
+[[subscribes]]
+namespace = "provider"
+name      = "stream-done"

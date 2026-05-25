@@ -1,0 +1,28 @@
+[extension]
+id             = "chat-panel"
+version        = "0.1.0"
+kind           = "Panel"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+requires       = ["transcript", "provider-lmstudio", "http-api"]
+
+[[subscribes]]
+namespace = "transcript"
+name      = "message-added"
+
+[[subscribes]]
+namespace = "provider"
+name      = "stream-start"
+
+[[subscribes]]
+namespace = "provider"
+name      = "stream-delta"
+
+[[subscribes]]
+namespace = "provider"
+name      = "stream-done"
+
+[[subscribes]]
+namespace = "canvas"
+name      = "ready"

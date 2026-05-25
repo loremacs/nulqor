@@ -1,0 +1,24 @@
+[extension]
+id             = "skill-runner"
+version        = "0.1.0"
+kind           = "Service"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+requires       = ["context-editor"]
+
+[[commands]]
+id            = "skill-runner:load@1"
+owner         = "skill-runner"
+input-schema  = '{ "name": "string" }'
+output-schema = '{ "name": "string", "body": "string", "found": "boolean" }'
+callable-by   = ["panel", "agent", "service"]
+permission    = "read"
+
+[[commands]]
+id            = "skill-runner:list@1"
+owner         = "skill-runner"
+input-schema  = "{}"
+output-schema = '{ "skills": "array" }'
+callable-by   = ["panel", "agent", "service"]
+permission    = "read"

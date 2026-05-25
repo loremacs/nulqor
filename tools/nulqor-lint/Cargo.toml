@@ -1,0 +1,18 @@
+[package]
+name = "nulqor-lint"
+version = "0.1.0"
+edition = "2021"
+description = "Nulqor extension manifest linter — runs before load and in CI"
+
+[lib]
+name = "nulqor_lint"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nulqor-lint"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+semver = "1"

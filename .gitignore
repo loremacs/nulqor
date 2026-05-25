@@ -1,0 +1,27 @@
+# .gitignore — Nulqor
+
+# Rust/Cargo
+target/
+Cargo.lock
+
+# Node / frontend build
+node_modules/
+dist/
+dist-ssr/
+
+# Tauri generated files
+src-tauri/gen/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Draft/review files (never commit unreviewed changes)
+*.draft
+*.review

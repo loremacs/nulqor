@@ -1,0 +1,14 @@
+[extension]
+id             = "run-logger"
+version        = "0.1.0"
+kind           = "Service"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+requires       = ["transcript"]
+fs-scopes      = ["runs/"]
+
+[[subscribes]]
+namespace = "transcript"
+name      = "message-added"
+version   = "1"

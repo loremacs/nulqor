@@ -1,0 +1,46 @@
+[extension]
+id             = "context-editor"
+version        = "0.1.0"
+kind           = "Panel"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+requires       = ["host"]
+
+[[commands]]
+id           = "context-editor:reload@1"
+owner        = "context-editor"
+permission   = "write"
+output-schema = '{ "skills": "number", "agents": "number", "rules": "number" }'
+
+[[commands]]
+id           = "context-editor:list-skills@1"
+owner        = "context-editor"
+permission   = "read"
+output-schema = '{ "skills": "array" }'
+
+[[commands]]
+id           = "context-editor:list-agents@1"
+owner        = "context-editor"
+permission   = "read"
+output-schema = '{ "agents": "array" }'
+
+[[commands]]
+id           = "context-editor:list-rules@1"
+owner        = "context-editor"
+permission   = "read"
+output-schema = '{ "rules": "array" }'
+
+[[commands]]
+id           = "context-editor:load-skill@1"
+owner        = "context-editor"
+permission   = "read"
+input-schema  = '{ "name": "string" }'
+output-schema = '{ "name": "string", "description": "string", "body": "string" }'
+
+[[commands]]
+id           = "context-editor:system-prompt@1"
+owner        = "context-editor"
+permission   = "read"
+input-schema  = '{ "agent": "string?" }'
+output-schema = '{ "prompt": "string", "token_estimate": "number" }'

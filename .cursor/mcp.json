@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "nulqor": {
+      "command": "cargo",
+      "args": [
+        "run",
+        "--manifest-path",
+        "tools/mcp-server/Cargo.toml",
+        "--quiet",
+        "--"
+      ],
+      "env": {
+        "NULQOR_API_URL": "http://localhost:8080"
+      }
+    }
+  }
+}

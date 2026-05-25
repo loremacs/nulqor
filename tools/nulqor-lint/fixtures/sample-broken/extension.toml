@@ -1,0 +1,24 @@
+[extension]
+id             = "Sample Broken Extension"   # BAD: spaces and uppercase (must be kebab-case)
+version        = "not-semver"               # BAD: not valid semver
+kind           = "Widget"                   # BAD: not a valid kind
+api-version    = "1"                        # BAD: must be "v1" (missing 'v' prefix)
+schema-version = "1.0"                      # BAD: not valid semver (missing patch)
+min-core       = "0.1.0"                    # OK
+fs-scopes      = ["../other-extension/data"] # BAD: cross-extension boundary violation
+
+[[commands]]
+id           = "hello:ping"                  # BAD: missing @version suffix
+owner        = ""                            # BAD: owner is empty
+permission   = "superuser"                   # BAD: not a valid permission class
+
+[[publishes]]
+id = "canvas:ready"                          # BAD: missing @version
+
+[[subscribes]]
+namespace = ""                               # BAD: empty namespace
+
+[[provides]]
+capability = "storage"
+instance   = "main"
+contract   = "storage"                       # BAD: missing @version

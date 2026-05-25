@@ -1,0 +1,13 @@
+[extension]
+id             = "host"
+version        = "0.1.0"
+kind           = "Host"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+
+[[commands]]
+id           = "canvas:status@1"
+owner        = "host"
+permission   = "read"
+output-schema = '{ "ready": "boolean" }'

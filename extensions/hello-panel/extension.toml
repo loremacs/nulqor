@@ -1,0 +1,18 @@
+[extension]
+id             = "hello-panel"
+version        = "0.1.0"
+kind           = "Panel"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+requires       = ["host"]
+
+[[commands]]
+id           = "hello:ping@1"
+owner        = "hello-panel"
+permission   = "read"
+output-schema = '{ "pong": "boolean", "source": "string" }'
+
+[[subscribes]]
+namespace = "canvas"
+name      = "ready"
