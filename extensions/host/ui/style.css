@@ -136,6 +136,23 @@ body,
 .menu-bar[data-dock="left"] .menu-bar-items,
 .menu-bar[data-dock="right"] .menu-bar-items {
   flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+}
+
+.menu-bar[data-dock="left"] .menu-btn,
+.menu-bar[data-dock="right"] .menu-btn {
+  width: 100%;
+  padding: 0.5rem 0.25rem;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+.menu-bar[data-dock="left"] .menu-window-controls,
+.menu-bar[data-dock="right"] .menu-window-controls {
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
 }
 
 .menu-bar-spacer {

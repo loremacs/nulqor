@@ -23,6 +23,15 @@ export type CanvasConfig = {
 
 export type MenuDock = "top" | "bottom" | "left" | "right";
 
+export type WindowFrameState = {
+  mode: "fullscreen" | "windowed";
+  width: number;
+  height: number;
+  /** Outer position in physical pixels; x/y < 0 means center on restore. */
+  x: number;
+  y: number;
+};
+
 /** Per-panel tile on the canvas desk. */
 export type TileLayout = {
   id: string;
@@ -33,18 +42,19 @@ export type TileLayout = {
   /** Pixel position when snap is off (relative to desktop top-left). */
   freeX?: number;
   freeY?: number;
+  /** Fixed pixel box; used after grid spacing changes until the panel is moved/resized again. */
+  pixelLock?: { left: number; top: number; width: number; height: number };
 };
 
 export type PersistedShellState = {
   menuDock: MenuDock;
   shell: ShellConfig;
-  /** Last layout for every panel that has been opened (key = panel id). */
   panelLayouts: Record<string, TileLayout>;
-  /** Currently open panel ids. */
   openPanelIds: string[];
+  windowFrame?: WindowFrameState;
 };
 
-export const STORAGE_KEY = "nulqor-shell-v6";
+export const STORAGE_KEY = "nulqor-shell-v7";
 
 export const DEFAULT_SHELL: ShellConfig = {
   cell_pixels: 64,

@@ -1,13 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
-import { LogicalSize } from "@tauri-apps/api/dpi";
+import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import {
   applyMenuLayout,
   clampTileToDesk,
+  lockTilePixels,
   nearestMenuDock,
   pointerToGridCell,
-  retilePreservingPixels,
+  snapTileFromPointer,
+  tileDisplayRect,
   tileSnapRect,
   updateGridGeometry,
   type GridMetrics,
@@ -21,7 +23,9 @@ import {
   type PersistedShellState,
   type ShellConfig,
   type TileLayout,
+  type WindowFrameState,
 } from "./types";
+import { captureWindowFrame, DEFAULT_WINDOWED_FRAME } from "./window-frame";
 
 const DEFAULT_TILE_COLS = 4;
 const DEFAULT_TILE_ROWS = 3;
@@ -108,25 +112,14 @@ function applyTileToElement(
   metrics: GridMetrics,
 ): void {
   clearTilePositionStyle(el);
-
-  if (!shell.snap_enabled && tile.freeX !== undefined && tile.freeY !== undefined) {
-    const { width, height } = tileSnapRect(tile, metrics);
-    el.classList.add("panel-tile-free");
-    el.style.position = "absolute";
-    el.style.left = `${tile.freeX}px`;
-    el.style.top = `${tile.freeY}px`;
-    el.style.width = `${width}px`;
-    el.style.height = `${height}px`;
-    return;
-  }
-
-  const snapped = tileSnapRect(tile, metrics);
-  el.classList.add("panel-tile-snap");
+  const rect = tileDisplayRect(tile, metrics, shell.snap_enabled);
+  const isFree = !shell.snap_enabled && tile.freeX !== undefined && tile.freeY !== undefined;
+  el.classList.add(isFree ? "panel-tile-free" : "panel-tile-snap");
   el.style.position = "absolute";
-  el.style.left = `${snapped.left}px`;
-  el.style.top = `${snapped.top}px`;
-  el.style.width = `${snapped.width}px`;
-  el.style.height = `${snapped.height}px`;
+  el.style.left = `${rect.left}px`;
+  el.style.top = `${rect.top}px`;
+  el.style.width = `${rect.width}px`;
+  el.style.height = `${rect.height}px`;
 }
 
 function trackPointerSession(
@@ -151,6 +144,51 @@ function isMenuDragBlocked(target: HTMLElement): boolean {
   );
 }
 
+const MENU_BAR_DRAG_PX = 5;
+
+/**
+ * Defer drag until the pointer moves so dblclick is not suppressed by preventDefault.
+ * Windowed: startDragging after threshold. Fullscreen: re-dock menu on release after threshold.
+ */
+function trackMenuBarDrag(
+  pointerDown: PointerEvent,
+  windowMode: "fullscreen" | "windowed",
+  onDock: (event: PointerEvent) => void,
+): void {
+  const originX = pointerDown.clientX;
+  const originY = pointerDown.clientY;
+  let dragging = false;
+
+  const cleanup = (): void => {
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
+    document.removeEventListener("pointercancel", onUp);
+  };
+
+  const onMove = (event: PointerEvent): void => {
+    if (dragging) return;
+    const dx = event.clientX - originX;
+    const dy = event.clientY - originY;
+    if (Math.hypot(dx, dy) < MENU_BAR_DRAG_PX) return;
+    dragging = true;
+    if (windowMode === "windowed") {
+      cleanup();
+      void getCurrentWindow().startDragging();
+    }
+  };
+
+  const onUp = (event: PointerEvent): void => {
+    if (dragging && windowMode === "fullscreen") {
+      onDock(event);
+    }
+    cleanup();
+  };
+
+  document.addEventListener("pointermove", onMove);
+  document.addEventListener("pointerup", onUp);
+  document.addEventListener("pointercancel", onUp);
+}
+
 export async function initShell(): Promise<void> {
   const app = document.getElementById("app");
   if (!app) throw new Error("#app not found");
@@ -171,7 +209,10 @@ export async function initShell(): Promise<void> {
   }
 
   let menuDock: MenuDock = persisted?.menuDock ?? "top";
-  let windowMode: "fullscreen" | "windowed" = "fullscreen";
+  let windowMode: "fullscreen" | "windowed" = persisted?.windowFrame?.mode ?? "fullscreen";
+  let windowFrame: WindowFrameState =
+    persisted?.windowFrame ??
+    (windowMode === "windowed" ? { ...DEFAULT_WINDOWED_FRAME } : { mode: "fullscreen", width: 1280, height: 720, x: 0, y: 0 });
 
   app.innerHTML = `
     <div class="nulqor-shell" data-menu-dock="${menuDock}">
@@ -242,7 +283,13 @@ export async function initShell(): Promise<void> {
     tiles.forEach((t) => {
       panelLayouts[t.id] = t;
     });
-    savePersisted({ menuDock, shell, panelLayouts, openPanelIds });
+    savePersisted({ menuDock, shell, panelLayouts, openPanelIds, windowFrame });
+  };
+
+  const refreshWindowFrame = async (): Promise<void> => {
+    windowFrame = await captureWindowFrame();
+    windowMode = windowFrame.mode;
+    persist();
   };
 
   const renderAppsMenu = (): void => {
@@ -357,9 +404,7 @@ export async function initShell(): Promise<void> {
     refreshGrid();
 
     if (key === "cell_pixels") {
-      tiles = tiles.map((t) =>
-        retilePreservingPixels(t, prevMetrics, gridMetrics, shell.snap_enabled),
-      );
+      tiles = tiles.map((t) => lockTilePixels(t, prevMetrics, shell.snap_enabled));
     } else if (shell.snap_enabled) {
       tiles = tiles.map((t) => {
         if (t.freeX !== undefined && t.freeY !== undefined) {
@@ -396,7 +441,9 @@ export async function initShell(): Promise<void> {
     restoreBtn.title = fullscreen ? "Restore down" : "Maximize";
     restoreBtn.textContent = fullscreen ? "❐" : "□";
     const brand = menuBar.querySelector<HTMLElement>(".menu-bar-brand")!;
-    brand.title = fullscreen ? "Drag to move menu bar" : "Drag to move window";
+    brand.title = fullscreen
+      ? "Drag to move menu bar · double-click to restore"
+      : "Drag to move window · double-click for fullscreen";
   };
 
   void syncWindowMode().catch((err) => {
@@ -407,25 +454,50 @@ export async function initShell(): Promise<void> {
     void getCurrentWindow().minimize();
   });
 
-  restoreBtn.addEventListener("click", () => {
-    void (async () => {
+  let togglingFullscreen = false;
+
+  const toggleWindowFullscreen = async (): Promise<void> => {
+    if (togglingFullscreen) return;
+    togglingFullscreen = true;
+    try {
       const win = getCurrentWindow();
       const fullscreen = await win.isFullscreen();
       if (fullscreen) {
         windowMode = "windowed";
+        const target = windowFrame.mode === "windowed" ? windowFrame : DEFAULT_WINDOWED_FRAME;
         await win.setFullscreen(false);
         await win.setResizable(true);
-        await win.setSize(new LogicalSize(1280, 720));
-        await win.center();
+        await win.setSize(new LogicalSize(target.width, target.height));
+        if (target.x < 0 || target.y < 0) {
+          await win.center();
+        } else {
+          await win.setPosition(new PhysicalPosition(target.x, target.y));
+        }
       } else {
+        await refreshWindowFrame();
         windowMode = "fullscreen";
         await win.setFullscreen(true);
         await win.setResizable(false);
       }
       await syncWindowMode();
+      await refreshWindowFrame();
       refreshGrid();
       void renderTiles();
-    })();
+    } finally {
+      togglingFullscreen = false;
+    }
+  };
+
+  restoreBtn.addEventListener("click", () => {
+    void toggleWindowFullscreen();
+  });
+
+  menuBar.addEventListener("dblclick", (event) => {
+    const target = event.target as HTMLElement;
+    if (isMenuDragBlocked(target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void toggleWindowFullscreen();
   });
 
   app.querySelector('[data-action="close"]')!.addEventListener("click", () => {
@@ -433,11 +505,30 @@ export async function initShell(): Promise<void> {
   });
 
   void getCurrentWindow()
+    .onCloseRequested(async (event) => {
+      event.preventDefault();
+      await refreshWindowFrame();
+      await getCurrentWindow().destroy();
+    })
+    .catch((err) => {
+      console.warn("[host] onCloseRequested unavailable:", err);
+    });
+
+  void getCurrentWindow()
+    .onMoved(() => {
+      if (windowMode === "windowed") void refreshWindowFrame();
+    })
+    .catch((err) => {
+      console.warn("[host] onMoved unavailable:", err);
+    });
+
+  void getCurrentWindow()
     .onResized(() => {
       refreshGrid();
       tiles = tiles.map((t) => clampTile(t, gridMetrics));
       void renderTiles();
       void syncWindowMode();
+      if (windowMode === "windowed") void refreshWindowFrame();
     })
     .catch((err) => {
       console.warn("[host] onResized unavailable:", err);
@@ -483,15 +574,9 @@ export async function initShell(): Promise<void> {
     const target = event.target as HTMLElement;
     if (isMenuDragBlocked(target)) return;
 
-    if (windowMode === "windowed") {
-      event.preventDefault();
-      void getCurrentWindow().startDragging();
-      return;
-    }
-
-    event.preventDefault();
-    trackPointerSession(
-      () => {},
+    trackMenuBarDrag(
+      event,
+      windowMode,
       (endEvent) => {
         setMenuDock(nearestMenuDock(endEvent.clientX, endEvent.clientY));
         persist();
@@ -522,13 +607,27 @@ export async function initShell(): Promise<void> {
       const origin = desktopOrigin();
       const freeX = clientX - tileDrag.pointerOffsetX - origin.left;
       const freeY = clientY - tileDrag.pointerOffsetY - origin.top;
-      return { ...tile, freeX, freeY };
+      return { ...tile, freeX, freeY, pixelLock: undefined };
     }
 
     const topLeftX = clientX - tileDrag.pointerOffsetX;
     const topLeftY = clientY - tileDrag.pointerOffsetY;
-    const cell = pointerToGridCell(topLeftX, topLeftY, desktop, gridMetrics);
-    return clampTile({ ...tile, col: cell.col, row: cell.row, freeX: undefined, freeY: undefined }, gridMetrics);
+
+    if (tile.pixelLock) {
+      const cell = pointerToGridCell(topLeftX, topLeftY, desktop, gridMetrics);
+      return {
+        ...tile,
+        col: cell.col,
+        row: cell.row,
+        pixelLock: {
+          ...tile.pixelLock,
+          left: (cell.col - 1) * gridMetrics.step,
+          top: (cell.row - 1) * gridMetrics.step,
+        },
+      };
+    }
+
+    return snapTileFromPointer(tile, topLeftX, topLeftY, desktop, gridMetrics);
   };
 
   const applyResize = (clientX: number, clientY: number): void => {
@@ -538,7 +637,7 @@ export async function initShell(): Promise<void> {
     const endCell = pointerToGridCell(clientX, clientY, desktop, gridMetrics);
     const colSpan = Math.max(MIN_TILE_COLS, endCell.col - tile.col + 1);
     const rowSpan = Math.max(MIN_TILE_ROWS, endCell.row - tile.row + 1);
-    const next = clampTile({ ...tile, colSpan, rowSpan }, gridMetrics);
+    const next = clampTile({ ...tile, colSpan, rowSpan, pixelLock: undefined }, gridMetrics);
     tiles = tiles.map((t) => (t.id === tileResize!.id ? next : t));
     applyTileToElement(tileResize.el, next, shell, gridMetrics);
     persist();
@@ -583,10 +682,20 @@ export async function initShell(): Promise<void> {
         if (next) applyTileToElement(tileDrag!.el, next, shell, gridMetrics);
       },
       (endEvent) => {
-        const next = positionTileFromPointer(endEvent.clientX, endEvent.clientY);
-        if (next) {
-          tiles = tiles.map((t) => (t.id === tileDrag!.id ? next : t));
-          panelLayouts[next.id] = next;
+        const dragged = tiles.find((t) => t.id === tileDrag!.id);
+        if (!dragged) {
+          tileDrag = null;
+          return;
+        }
+        const topLeftX = endEvent.clientX - tileDrag!.pointerOffsetX;
+        const topLeftY = endEvent.clientY - tileDrag!.pointerOffsetY;
+        let resolved =
+          shell.snap_enabled && dragged.pixelLock
+            ? snapTileFromPointer(dragged, topLeftX, topLeftY, desktop, gridMetrics)
+            : positionTileFromPointer(endEvent.clientX, endEvent.clientY);
+        if (resolved) {
+          tiles = tiles.map((t) => (t.id === tileDrag!.id ? resolved! : t));
+          panelLayouts[resolved.id] = resolved;
         }
         tileDrag = null;
         persist();

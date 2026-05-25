@@ -124,16 +124,53 @@ export function clampTileToDesk(tile: TileLayout, metrics: GridMetrics): TileLay
   return { ...tile, col, row, colSpan, rowSpan };
 }
 
-export function tilePixelRect(
+export function tileDisplayRect(
   tile: TileLayout,
   metrics: GridMetrics,
   snapEnabled: boolean,
 ): { left: number; top: number; width: number; height: number } {
+  if (tile.pixelLock) return tile.pixelLock;
   if (!snapEnabled && tile.freeX !== undefined && tile.freeY !== undefined) {
     const { width, height } = tilePixelSize(tile, metrics);
     return { left: tile.freeX, top: tile.freeY, width, height };
   }
   return tileSnapRect(tile, metrics);
+}
+
+export function tilePixelRect(
+  tile: TileLayout,
+  metrics: GridMetrics,
+  snapEnabled: boolean,
+): { left: number; top: number; width: number; height: number } {
+  return tileDisplayRect(tile, metrics, snapEnabled);
+}
+
+/** Keep exact pixel size/position when cell size changes; panels re-snap on next drag. */
+export function lockTilePixels(
+  tile: TileLayout,
+  metrics: GridMetrics,
+  snapEnabled: boolean,
+): TileLayout {
+  const rect = tileDisplayRect(tile, metrics, snapEnabled);
+  return { ...tile, pixelLock: rect, freeX: undefined, freeY: undefined };
+}
+
+/** After a drag with snap, clear pixel lock and align to the new grid. */
+export function snapTileFromPointer(
+  tile: TileLayout,
+  topLeftX: number,
+  topLeftY: number,
+  desktop: HTMLElement,
+  metrics: GridMetrics,
+): TileLayout {
+  const cell = pointerToGridCell(topLeftX, topLeftY, desktop, metrics);
+  const base = tile.pixelLock ?? tileSnapRect(tile, metrics);
+  const colSpan = Math.max(1, Math.min(metrics.cols, Math.round(base.width / metrics.step)));
+  const rowSpan = Math.max(1, Math.min(metrics.rows, Math.round(base.height / metrics.step)));
+  return clampTileToDesk(
+    { ...tile, col: cell.col, row: cell.row, colSpan, rowSpan, pixelLock: undefined, freeX: undefined, freeY: undefined },
+    metrics,
+  );
 }
 
 /** Map a pixel rectangle to the nearest grid cells on `metrics` without scaling the pixel size. */
@@ -149,19 +186,4 @@ export function tileLayoutFromPixelRect(
   const col = Math.min(maxCol, Math.max(1, Math.floor(rect.left / metrics.step) + 1));
   const row = Math.min(maxRow, Math.max(1, Math.floor(rect.top / metrics.step) + 1));
   return { id, col, row, colSpan, rowSpan };
-}
-
-/** Keep panel pixel size/position when the cell size changes; re-align to the new grid. */
-export function retilePreservingPixels(
-  tile: TileLayout,
-  oldMetrics: GridMetrics,
-  newMetrics: GridMetrics,
-  snapEnabled: boolean,
-): TileLayout {
-  const rect = tilePixelRect(tile, oldMetrics, snapEnabled);
-  const next = tileLayoutFromPixelRect(rect, newMetrics, tile.id);
-  if (!snapEnabled) {
-    return clampTileToDesk({ ...next, freeX: rect.left, freeY: rect.top }, newMetrics);
-  }
-  return clampTileToDesk({ ...next, freeX: undefined, freeY: undefined }, newMetrics);
 }
