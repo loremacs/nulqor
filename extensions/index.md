@@ -9,6 +9,7 @@ Each extension is self-contained under `extensions/<id>/`. Rust sources compile 
 
 | Id | Kind | Status | Purpose |
 |---|---|---|---|
+| `clock-panel` | Panel | Phase 1 | Live clock tile for multi-panel canvas testing |
 | `host` | Host | Phase 1 | Transparent canvas shell — grid desk, menu bar, panel tiles |
 | `hello-panel` | Panel | Phase 1 | Sample panel — proves extension contract end-to-end |
 | `hello-world` | Panel | Phase 1 | Minimal "Hello World" window — startup profile demo |

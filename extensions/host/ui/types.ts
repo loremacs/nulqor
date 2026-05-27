@@ -9,6 +9,8 @@ export type ShellConfig = {
   cell_step: number;
   snap_enabled: boolean;
   show_grid: boolean;
+  /** Snap split-pane sashes to align with other dividers in layout mode. */
+  sash_snap_enabled: boolean;
   /** Pass clicks on empty canvas areas to the OS desktop (fullscreen overlay mode). */
   click_through: boolean;
   /** Keep the Nulqor window above other applications. */
@@ -52,15 +54,25 @@ export type TileLayout = {
   pixelLock?: { left: number; top: number; width: number; height: number };
 };
 
+export type { CanvasMode, CanvasProfile, GridCanvasState } from "./canvas-profiles";
+export type { SplitCanvasState, BuiltInPreset, SplitNode } from "./split-layout";
+
 export type PersistedShellState = {
   menuDock: MenuDock;
   shell: ShellConfig;
+  /** Canvas layout engine: free grid tiles or split-pane regions. */
+  canvasMode: import("./canvas-profiles").CanvasMode;
   panelLayouts: Record<string, TileLayout>;
   openPanelIds: string[];
+  split?: import("./split-layout").SplitCanvasState;
+  canvasProfiles: (import("./canvas-profiles").CanvasProfile | null)[];
+  activeProfileId: string | null;
+  layoutEditing: boolean;
   windowFrame?: WindowFrameState;
 };
 
-export const STORAGE_KEY = "nulqor-shell-v7";
+export const STORAGE_KEY = "nulqor-shell-v8";
+export const STORAGE_KEY_LEGACY = "nulqor-shell-v7";
 
 export const CELL_PIXELS_MIN = 1;
 export const CELL_PIXELS_MAX = 256;
@@ -72,9 +84,14 @@ export const DEFAULT_SHELL: ShellConfig = {
   cell_step: 10,
   snap_enabled: true,
   show_grid: true,
+  sash_snap_enabled: true,
   click_through: true,
   always_on_top: false,
 };
+
+/** Minimum panel tile size so header + body content stay readable. */
+export const PANEL_MIN_WIDTH_PX = 200;
+export const PANEL_MIN_HEIGHT_PX = 120;
 
 export function clampCellPixels(value: number): number {
   const n = Math.round(value);

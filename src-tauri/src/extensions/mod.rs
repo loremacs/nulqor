@@ -27,3 +27,7 @@ pub mod validation;
 pub mod run_logger;
 
 
+
+#[path = "../../../extensions/clock-panel/src/lib.rs"]
+pub mod clock_panel;
+

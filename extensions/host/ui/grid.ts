@@ -1,5 +1,5 @@
 import type { ShellConfig, MenuDock, TileLayout } from "./types";
-import { cellPixels } from "./types";
+import { cellPixels, PANEL_MIN_HEIGHT_PX, PANEL_MIN_WIDTH_PX } from "./types";
 
 export type GridMetrics = {
   cols: number;
@@ -134,9 +134,19 @@ export function menuDockSnapTarget(clientX: number, clientY: number): MenuDock |
   return nearestMenuDock(clientX, clientY);
 }
 
+export function minTileColSpan(metrics: GridMetrics): number {
+  return Math.max(1, Math.ceil(PANEL_MIN_WIDTH_PX / metrics.step));
+}
+
+export function minTileRowSpan(metrics: GridMetrics): number {
+  return Math.max(1, Math.ceil(PANEL_MIN_HEIGHT_PX / metrics.step));
+}
+
 export function clampTileToDesk(tile: TileLayout, metrics: GridMetrics): TileLayout {
-  const colSpan = Math.min(Math.max(1, tile.colSpan), metrics.cols);
-  const rowSpan = Math.min(Math.max(1, tile.rowSpan), metrics.rows);
+  const minCols = minTileColSpan(metrics);
+  const minRows = minTileRowSpan(metrics);
+  const colSpan = Math.min(Math.max(minCols, tile.colSpan), metrics.cols);
+  const rowSpan = Math.min(Math.max(minRows, tile.rowSpan), metrics.rows);
   const maxCol = Math.max(1, metrics.cols - colSpan + 1);
   const maxRow = Math.max(1, metrics.rows - rowSpan + 1);
   const col = Math.min(Math.max(1, tile.col), maxCol);
@@ -172,7 +182,37 @@ export function lockTilePixels(
   snapEnabled: boolean,
 ): TileLayout {
   const rect = tileDisplayRect(tile, metrics, snapEnabled);
-  return { ...tile, pixelLock: rect, freeX: undefined, freeY: undefined };
+  return {
+    ...tile,
+    pixelLock: {
+      left: rect.left,
+      top: rect.top,
+      width: Math.max(rect.width, PANEL_MIN_WIDTH_PX),
+      height: Math.max(rect.height, PANEL_MIN_HEIGHT_PX),
+    },
+    freeX: undefined,
+    freeY: undefined,
+  };
+}
+
+/** Metrics stub for pixel locking (only step/cellSize affect tile rects). */
+export function metricsForCellSize(
+  cellSize: number,
+  desktopW = 1920,
+  desktopH = 1080,
+): GridMetrics {
+  const step = cellSize + GAP;
+  return {
+    cols: deskColumns(desktopW, step),
+    rows: deskRows(desktopH, step),
+    gap: GAP,
+    cellSize,
+    step,
+    desktopW,
+    desktopH,
+    originX: 0,
+    originY: 0,
+  };
 }
 
 /** After a drag with snap, clear pixel lock and align to the new grid. */

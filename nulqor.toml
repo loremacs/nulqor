@@ -1,11 +1,12 @@
 # Nulqor startup — shell loads host desk; panels open as tiles on the grid.
 # Restart after changing enabled_extensions. Panel open/close is live in the Apps menu.
 
-open_panels = ["hello-world"]
+open_panels = ["hello-world", "clock-panel"]
 
 enabled_extensions = [
   "host",
   "hello-world",
+  "clock-panel",
 ]
 
 [shell]

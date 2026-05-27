@@ -12,7 +12,10 @@ body,
   margin: 0;
   overflow: hidden;
   background: transparent;
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
   color: #eaeaea;
 }
 
@@ -35,7 +38,11 @@ body,
 
 .nulqor-shell .menu-bar,
 .nulqor-shell .panel-tile,
-.nulqor-shell .menu-dropdown.is-open {
+.nulqor-shell .menu-dropdown.is-open,
+.nulqor-shell .shell-modal-backdrop,
+.nulqor-shell .split-sash,
+.nulqor-shell .split-slot-edit-bar,
+.nulqor-shell .split-slot-edit-bar button {
   pointer-events: auto;
 }
 
@@ -359,6 +366,28 @@ body,
   pointer-events: none;
 }
 
+.menu-dropdown-section-header {
+  padding: 8px 12px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0.9;
+  pointer-events: none;
+  user-select: none;
+}
+
+.menu-dropdown-section-header:first-child {
+  padding-top: 4px;
+}
+
+.menu-dropdown-row-empty:disabled {
+  color: var(--menu-fg-muted);
+  font-style: italic;
+  opacity: 0.85;
+}
+
 .menu-dropdown-gutter {
   flex-shrink: 0;
   width: 28px;
@@ -438,6 +467,170 @@ body,
   border: none;
 }
 
+/* ── Centered shell modal (save layout, etc.) ──────────────────────────── */
+
+.shell-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+}
+
+.shell-modal {
+  width: min(100%, 360px);
+  padding: 20px 22px 16px;
+  background: var(--menu-bg);
+  border: 1px solid #454545;
+  border-radius: 4px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+
+.shell-modal-title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.shell-modal-desc {
+  margin: 0 0 16px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--menu-fg-muted);
+}
+
+.shell-modal-field {
+  display: block;
+  margin-bottom: 18px;
+}
+
+.shell-modal-slots {
+  margin: 0 0 12px;
+  padding: 0;
+  border: none;
+}
+
+.shell-modal-slot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.shell-modal-slot-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid #3c3c3c;
+  border-radius: 2px;
+  background: #252526;
+  cursor: pointer;
+}
+
+.shell-modal-slot-option:has(input:checked) {
+  border-color: #007acc;
+  background: rgba(0, 122, 204, 0.12);
+}
+
+.shell-modal-slot-option input {
+  margin: 0;
+  accent-color: #007acc;
+}
+
+.shell-modal-slot-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--menu-fg);
+}
+
+.shell-modal-slot-hint {
+  flex-shrink: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #e2a04a;
+}
+
+.shell-modal-slot-hint-empty {
+  color: var(--menu-fg-muted);
+}
+
+.shell-modal-overwrite {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #e2a04a;
+}
+
+.shell-modal-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--menu-fg);
+}
+
+.shell-modal-input {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  background: #3c3c3c;
+  border: 1px solid #3c3c3c;
+  border-radius: 2px;
+  color: var(--menu-fg);
+  font: inherit;
+  font-size: 13px;
+}
+
+.shell-modal-input:hover {
+  border-color: #555555;
+}
+
+.shell-modal-input:focus {
+  border-color: #007acc;
+  outline: none;
+}
+
+.shell-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.shell-modal-btn {
+  min-width: 72px;
+  padding: 5px 14px;
+  background: #3c3c3c;
+  border: 1px solid #3c3c3c;
+  border-radius: 2px;
+  color: var(--menu-fg);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.shell-modal-btn:hover {
+  background: #454545;
+  border-color: #555555;
+}
+
+.shell-modal-btn-primary {
+  background: #007acc;
+  border-color: #007acc;
+  color: #ffffff;
+}
+
+.shell-modal-btn-primary:hover {
+  background: #006bb3;
+  border-color: #006bb3;
+}
+
 .menu-bar[data-dock="left"] .menu-dropdown,
 .menu-bar[data-dock="right"] .menu-dropdown {
   top: 0;
@@ -451,35 +644,44 @@ body,
 
 /* ── Desktop grid: work area starts at the menu bar inner edge ─────────── */
 
-.nulqor-shell[data-menu-dock="top"] .desktop-grid {
+.desktop-grid,
+.desktop-split,
+.desktop-canvas {
+  position: fixed;
+  padding: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.nulqor-shell[data-menu-dock="top"] .desktop-canvas {
   top: var(--menu-bar-thickness);
   left: 0;
   right: 0;
   bottom: 0;
 }
 
-.nulqor-shell[data-menu-dock="bottom"] .desktop-grid {
+.nulqor-shell[data-menu-dock="bottom"] .desktop-canvas {
   top: 0;
   left: 0;
   right: 0;
   bottom: var(--menu-bar-thickness);
 }
 
-.nulqor-shell[data-menu-dock="left"] .desktop-grid {
+.nulqor-shell[data-menu-dock="left"] .desktop-canvas {
   top: 0;
   left: var(--menu-bar-thickness);
   right: 0;
   bottom: 0;
 }
 
-.nulqor-shell[data-menu-dock="right"] .desktop-grid {
+.nulqor-shell[data-menu-dock="right"] .desktop-canvas {
   top: 0;
   left: 0;
   right: var(--menu-bar-thickness);
   bottom: 0;
 }
 
-.desktop-grid {
+.desktop-canvas {
   position: fixed;
   padding: 0;
   pointer-events: none;
@@ -490,7 +692,8 @@ body,
   background-image:
     linear-gradient(to right, rgba(255, 255, 255, 0.07) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
-  background-size: calc(var(--cell-size) + var(--grid-gap)) calc(var(--cell-size) + var(--grid-gap));
+  background-size: calc(var(--cell-size) + var(--grid-gap))
+    calc(var(--cell-size) + var(--grid-gap));
   background-position: 0 0;
 }
 
@@ -504,8 +707,8 @@ body,
   pointer-events: auto;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  min-width: 0;
+  min-width: 200px;
+  min-height: 120px;
   position: relative;
   box-sizing: border-box;
   background: var(--tile-bg);
@@ -634,4 +837,195 @@ body,
   bottom: 0;
   right: 0;
   width: var(--preview-thickness);
+}
+
+/* ── Layout menu + canvas edit mode ─────────────────────────────────────── */
+
+.menu-dropdown-wide {
+  min-width: 220px;
+}
+
+.menu-item.is-editing {
+  background: rgba(110, 168, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(110, 168, 255, 0.35);
+}
+
+.nulqor-shell.canvas-editing .desktop-canvas {
+  outline: 1px dashed rgba(110, 168, 255, 0.35);
+  outline-offset: -1px;
+}
+
+/* ── Split layout mode ──────────────────────────────────────────────────── */
+
+.desktop-split {
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.split-root,
+.split-container,
+.split-pane,
+.split-slot {
+  pointer-events: none;
+}
+
+.split-root {
+  flex: 1 1 auto;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.split-container {
+  min-width: 0;
+  min-height: 0;
+}
+
+.split-pane {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split-slot {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.split-slot-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 0.85rem;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  margin: 4px;
+  border-radius: 6px;
+}
+
+.panel-tile-split {
+  border-radius: 0;
+  box-shadow: none;
+  min-width: 0;
+  min-height: 0;
+}
+
+.nulqor-shell.canvas-editing .split-slot .panel-tile-split {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.split-sash {
+  flex: 0 0 6px;
+  pointer-events: auto;
+  background: rgba(255, 255, 255, 0.06);
+  transition: background 0.12s ease;
+  z-index: 3;
+}
+
+.split-sash-vertical {
+  cursor: col-resize;
+  margin: 0 -1px;
+}
+
+.split-sash-horizontal {
+  cursor: row-resize;
+  margin: -1px 0;
+}
+
+.split-sash:hover,
+.split-sash:active {
+  background: rgba(110, 168, 255, 0.45);
+}
+
+/* Ghost line shown while dragging a sash near a snap target */
+.sash-snap-preview {
+  position: fixed;
+  z-index: 998;
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 2px solid var(--accent);
+  background: rgba(110, 168, 255, 0.22);
+  box-shadow:
+    0 0 10px rgba(110, 168, 255, 0.35),
+    inset 0 0 0 1px rgba(110, 168, 255, 0.3);
+  opacity: 0;
+  transition: opacity 0.08s ease;
+  border-radius: 1px;
+}
+
+.sash-snap-preview.is-visible {
+  opacity: 1;
+}
+
+.split-slot-edit-bar {
+  display: flex;
+  gap: 4px;
+  padding: 2px 4px;
+  background: rgba(0, 0, 0, 0.85);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  position: relative;
+  z-index: 10;
+  flex-shrink: 0;
+  pointer-events: auto;
+}
+
+.split-slot-edit-bar button {
+  pointer-events: auto;
+  position: relative;
+  z-index: 11;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #ddd;
+  font-size: 0.7rem;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.split-slot-edit-bar button:hover {
+  background: rgba(110, 168, 255, 0.25);
+  color: #fff;
+}
+
+.split-subgrid {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  pointer-events: none;
+}
+
+.split-slot.is-drop-target {
+  outline: 2px dashed rgba(110, 168, 255, 0.75);
+  outline-offset: -2px;
+  background: rgba(110, 168, 255, 0.08);
+}
+
+.panel-tile-dragging {
+  opacity: 0.65;
+  cursor: grabbing !important;
+  pointer-events: none;
+}
+
+.panel-tile-dragging .panel-tile-header {
+  cursor: grabbing !important;
+}
+
+.split-subgrid.show-subgrid-lines {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: calc(var(--cell-size) + var(--grid-gap))
+    calc(var(--cell-size) + var(--grid-gap));
 }

@@ -40,8 +40,8 @@ use commands::CommandRegistry;
 use context::{AppState, CoreContext, InMemoryConfigStore};
 use events::EventBus;
 use extensions::{
-    chat_panel, context_editor, hello_panel, hello_world, host, http_api, mcp_bridge,
-    provider_lmstudio, run_logger, skill_runner, transcript, validation,
+    chat_panel, clock_panel, context_editor, hello_panel, hello_world, host, http_api,
+    mcp_bridge, provider_lmstudio, run_logger, skill_runner, transcript, validation,
 };
 use startup_config::load_startup_config;
 use permission::PermissionGate;
@@ -91,6 +91,7 @@ fn load_extensions(extensions_dir: &std::path::Path, ctx: &CoreContext) {
     loader.register("host", |m| Arc::new(host::HostExtension::new(m)));
     loader.register("hello-panel", |m| Arc::new(hello_panel::HelloPanelExtension::new(m)));
     loader.register("hello-world", |m| Arc::new(hello_world::HelloWorldExtension::new(m)));
+    loader.register("clock-panel", |m| Arc::new(clock_panel::ClockPanelExtension::new(m)));
     loader.register("provider-lmstudio", |m| {
         Arc::new(provider_lmstudio::LmStudioProvider::new(m))
     });

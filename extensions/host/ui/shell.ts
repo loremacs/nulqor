@@ -5,6 +5,8 @@ import {
   applyMenuLayout,
   clampTileToDesk,
   lockTilePixels,
+  minTileColSpan,
+  minTileRowSpan,
   nearestMenuDock,
   pointerToGridCell,
   snapTileFromPointer,
@@ -15,8 +17,34 @@ import {
   updateGridGeometry,
   type GridMetrics,
 } from "./grid";
+import {
+  applyProfileToGrid,
+  applyProfileToSplit,
+  captureGridProfile,
+  captureSplitProfile,
+  createSplitFromPreset,
+  emptyProfileSlotName,
+  MAX_CANVAS_PROFILES,
+  normalizeProfileSlots,
+  upsertProfile,
+  type CanvasMode,
+  type CanvasProfile,
+} from "./canvas-profiles";
+import {
+  syncGridLayoutsFromSplitTree,
+  syncSplitTreeFromGridLayouts,
+  syncSubGridSettingsFromShell,
+  syncGlobalPanelLayoutsFromSplitTree,
+  dedupeOpenPanelIds,
+  dedupePanelAssignmentsInTree,
+  allPanelIdsInTree,
+} from "./split-layout";
+import { renderSplitLayout, removePanelFromTree, syncSplitTreeFromDom } from "./split-render";
+import type { BuiltInPreset, SplitCanvasState } from "./split-layout";
+import { BUILT_IN_PRESETS, defaultSplitState } from "./split-layout";
 import { mountClickThrough } from "./click-through";
 import { mountMenuDockPreview } from "./menu-dock-preview";
+import { promptSaveLayout } from "./save-layout-dialog";
 import { isPanelResizable, mountPanel, registeredPanelIds } from "./panels";
 import {
   CELL_PIXELS_MAX,
@@ -25,6 +53,9 @@ import {
   clampCellStep,
   DEFAULT_SHELL,
   STORAGE_KEY,
+  STORAGE_KEY_LEGACY,
+  PANEL_MIN_HEIGHT_PX,
+  PANEL_MIN_WIDTH_PX,
   type CanvasConfig,
   type MenuDock,
   type PersistedShellState,
@@ -37,21 +68,12 @@ import { mountWindowChrome } from "./window-chrome";
 
 const DEFAULT_TILE_COLS = 4;
 const DEFAULT_TILE_ROWS = 3;
-const MIN_TILE_COLS = 1;
-const MIN_TILE_ROWS = 1;
 
-type ShellToggleKey =
-  | "snap_enabled"
-  | "show_grid"
-  | "click_through"
-  | "always_on_top";
+type ShellToggleKey = "click_through" | "always_on_top";
 
-const SHELL_TOGGLE_KEYS: ShellToggleKey[] = [
-  "snap_enabled",
-  "show_grid",
-  "click_through",
-  "always_on_top",
-];
+const SHELL_TOGGLE_KEYS: ShellToggleKey[] = ["click_through", "always_on_top"];
+
+type LayoutToggleKey = "snap_enabled" | "show_grid" | "sash_snap_enabled";
 
 function defaultTile(
   id: string,
@@ -68,7 +90,8 @@ function defaultTile(
 
 function loadPersisted(): PersistedShellState | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    let raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) raw = localStorage.getItem(STORAGE_KEY_LEGACY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PersistedShellState & {
       tiles?: TileLayout[];
@@ -87,6 +110,14 @@ function loadPersisted(): PersistedShellState | null {
         parsed.tiles.map((t) => [t.id, t]),
       );
       parsed.openPanelIds = parsed.tiles.map((t) => t.id);
+    }
+    if (!parsed.canvasMode) parsed.canvasMode = "grid";
+    parsed.canvasProfiles = normalizeProfileSlots(parsed.canvasProfiles);
+    if (parsed.activeProfileId === undefined) parsed.activeProfileId = null;
+    // Never restore edit mode — it suspends click-through until "Done".
+    parsed.layoutEditing = false;
+    if (parsed.canvasMode === "split" && !parsed.split) {
+      parsed.split = defaultSplitState("two-columns");
     }
     return parsed;
   } catch {
@@ -270,8 +301,8 @@ function applyTileToElement(
   el.style.position = "absolute";
   el.style.left = `${rect.left}px`;
   el.style.top = `${rect.top}px`;
-  el.style.width = `${rect.width}px`;
-  el.style.height = `${rect.height}px`;
+  el.style.width = `${Math.max(rect.width, PANEL_MIN_WIDTH_PX)}px`;
+  el.style.height = `${Math.max(rect.height, PANEL_MIN_HEIGHT_PX)}px`;
 }
 
 function trackPointerSession(
@@ -305,13 +336,14 @@ export async function initShell(): Promise<void> {
   const panelLayouts: Record<string, TileLayout> = {
     ...persisted?.panelLayouts,
   };
-  let openPanelIds: string[] =
+  let openPanelIds: string[] = dedupeOpenPanelIds(
     persisted?.openPanelIds?.filter(
       (id) => panelLayouts[id] || canvasConfig.open_panels.includes(id),
-    ) ?? [];
+    ) ?? [],
+  );
 
   if (openPanelIds.length === 0) {
-    openPanelIds = [...canvasConfig.open_panels];
+    openPanelIds = dedupeOpenPanelIds([...canvasConfig.open_panels]);
   }
 
   let menuDock: MenuDock = persisted?.menuDock ?? "top";
@@ -322,6 +354,25 @@ export async function initShell(): Promise<void> {
     (windowMode === "windowed"
       ? { ...DEFAULT_WINDOWED_FRAME }
       : { mode: "fullscreen", width: 1280, height: 720, x: 0, y: 0 });
+
+  let canvasMode: CanvasMode = persisted?.canvasMode ?? "grid";
+  let splitState: SplitCanvasState =
+    persisted?.split ?? createSplitFromPreset("two-columns", openPanelIds);
+  if (persisted?.split) {
+    splitState = {
+      ...splitState,
+      tree: dedupePanelAssignmentsInTree(splitState.tree),
+    };
+    openPanelIds = dedupeOpenPanelIds([
+      ...allPanelIdsInTree(splitState.tree),
+      ...openPanelIds,
+    ]);
+  }
+  let canvasProfiles = normalizeProfileSlots(persisted?.canvasProfiles);
+  let activeProfileId: string | null = persisted?.activeProfileId ?? null;
+  let layoutEditing = false;
+  let renderGeneration = 0;
+  let editClickThroughResume: (() => void) | null = null;
 
   app.innerHTML = `
     <div class="nulqor-shell" data-menu-dock="${menuDock}">
@@ -336,25 +387,6 @@ export async function initShell(): Promise<void> {
               <span class="menu-item-label">Settings</span>
             </button>
             <div class="menu-dropdown" data-panel="settings" hidden role="menu">
-              <label class="menu-dropdown-row menu-dropdown-row-value menu-dropdown-row-sizes">
-                <span class="menu-dropdown-gutter" aria-hidden="true"></span>
-                <span class="menu-dropdown-text">Cell Size</span>
-                <div class="menu-dropdown-values">
-                  <input type="number" class="menu-dropdown-value" min="1" max="256" step="any" inputmode="numeric" data-setting="cell_pixels" aria-label="Cell size" />
-                  <span class="menu-dropdown-inline-label">Step</span>
-                  <input type="number" class="menu-dropdown-value" min="1" max="256" step="any" inputmode="numeric" data-setting="cell_step" aria-label="Cell size step" />
-                </div>
-              </label>
-              <div class="menu-dropdown-separator" role="separator"></div>
-              <button type="button" class="menu-dropdown-row menu-dropdown-row-check" data-setting="snap_enabled" role="menuitemcheckbox" aria-checked="false">
-                <span class="menu-dropdown-gutter menu-dropdown-check" aria-hidden="true"></span>
-                <span class="menu-dropdown-text">Snap to Grid</span>
-              </button>
-              <button type="button" class="menu-dropdown-row menu-dropdown-row-check" data-setting="show_grid" role="menuitemcheckbox" aria-checked="false">
-                <span class="menu-dropdown-gutter menu-dropdown-check" aria-hidden="true"></span>
-                <span class="menu-dropdown-text">Show Grid Lines</span>
-              </button>
-              <div class="menu-dropdown-separator" role="separator"></div>
               <button type="button" class="menu-dropdown-row menu-dropdown-row-check" data-setting="click_through" role="menuitemcheckbox" aria-checked="false">
                 <span class="menu-dropdown-gutter menu-dropdown-check" aria-hidden="true"></span>
                 <span class="menu-dropdown-text">Click Through Desktop</span>
@@ -364,6 +396,13 @@ export async function initShell(): Promise<void> {
                 <span class="menu-dropdown-text">Always on Top</span>
               </button>
             </div>
+          </div>
+          <div class="menu-group">
+            <button type="button" class="menu-item" data-menu="layout" title="Layout" aria-label="Layout">
+              <img class="menu-item-icon" src="/extensions/host/ui/assets/icon-layout.svg" width="16" height="16" alt="" draggable="false" />
+              <span class="menu-item-label">Layout</span>
+            </button>
+            <div class="menu-dropdown menu-dropdown-wide" data-panel="layout" hidden role="menu"></div>
           </div>
           <div class="menu-group">
             <button type="button" class="menu-item" data-menu="apps" title="Apps" aria-label="Apps">
@@ -380,17 +419,19 @@ export async function initShell(): Promise<void> {
           <button type="button" class="menu-window-btn menu-window-btn-close" data-action="close" title="Close">×</button>
         </div>
       </header>
-      <div class="desktop-grid"></div>
+      <div class="desktop-canvas desktop-grid"></div>
     </div>
   `;
 
   const shellRoot = app.querySelector<HTMLElement>(".nulqor-shell")!;
   const menuBar = app.querySelector<HTMLElement>(".menu-bar")!;
-  const desktop = app.querySelector<HTMLElement>(".desktop-grid")!;
+  const desktop = app.querySelector<HTMLElement>(".desktop-canvas")!;
   const settingsPanel = app.querySelector<HTMLElement>(
     '[data-panel="settings"]',
   )!;
+  const layoutPanel = app.querySelector<HTMLElement>('[data-panel="layout"]')!;
   const appsPanel = app.querySelector<HTMLElement>('[data-panel="apps"]')!;
+  const layoutMenuBtn = app.querySelector<HTMLElement>('[data-menu="layout"]')!;
 
   let gridMetrics: GridMetrics;
 
@@ -463,7 +504,7 @@ export async function initShell(): Promise<void> {
     tiles.forEach((t) => {
       panelLayouts[t.id] = t;
     });
-    void renderTiles();
+    void renderCanvas();
     syncClickThrough();
     menuBar.style.transform = "translateZ(0)";
     requestAnimationFrame(() => {
@@ -485,13 +526,414 @@ export async function initShell(): Promise<void> {
     tiles.forEach((t) => {
       panelLayouts[t.id] = t;
     });
-    savePersisted({ menuDock, shell, panelLayouts, openPanelIds, windowFrame });
+    savePersisted({
+      menuDock,
+      shell,
+      canvasMode,
+      panelLayouts,
+      openPanelIds,
+      split: splitState,
+      canvasProfiles,
+      activeProfileId,
+      layoutEditing,
+      windowFrame,
+    });
+  };
+
+  const setLayoutEditing = (on: boolean): void => {
+    layoutEditing = on;
+    shellRoot.classList.toggle("canvas-editing", on);
+    layoutMenuBtn.classList.toggle("is-editing", on);
+    if (on) {
+      if (!editClickThroughResume)
+        editClickThroughResume = clickThrough.suspend();
+    } else if (editClickThroughResume) {
+      editClickThroughResume();
+      editClickThroughResume = null;
+    }
+    persist();
+    void renderCanvas();
+    renderLayoutMenu();
+    syncClickThrough();
+  };
+
+  const removeOrphanPanelTiles = (keepIds: Set<string>): void => {
+    const seen = new Set<string>();
+    for (const el of desktop.querySelectorAll<HTMLElement>(".panel-tile")) {
+      const id = el.dataset.panelId;
+      if (!id || !keepIds.has(id)) {
+        el.remove();
+        continue;
+      }
+      if (seen.has(id)) {
+        el.remove();
+        continue;
+      }
+      seen.add(id);
+    }
+  };
+
+  const clearSplitArtifacts = (): void => {
+    if (desktop.querySelector(".split-root, .split-container, .split-slot")) {
+      desktop.innerHTML = "";
+    }
+  };
+
+  const renderCanvas = async (): Promise<void> => {
+    const gen = ++renderGeneration;
+    if (canvasMode === "split") {
+      await renderSplitLayout({
+        desktop,
+        shellRoot,
+        shell,
+        split: splitState,
+        getTree: () => splitState.tree,
+        layoutEditing,
+        allowSlotDrag: true,
+        panelLayouts,
+        onTreeChange: (tree, preset) => {
+          splitState = { preset, tree: dedupePanelAssignmentsInTree(tree) };
+          persist();
+          void renderCanvas();
+        },
+        onPersistSplit: (tree) => {
+          const synced = syncSplitTreeFromDom(desktop, tree);
+          splitState = {
+            ...splitState,
+            tree: dedupePanelAssignmentsInTree(synced),
+          };
+          persist();
+        },
+        onClosePanel: (panelId) => {
+          panelLayouts[panelId] =
+            tiles.find((t) => t.id === panelId) ?? panelLayouts[panelId];
+          openPanelIds = openPanelIds.filter((id) => id !== panelId);
+          splitState = {
+            ...splitState,
+            tree: removePanelFromTree(splitState.tree, panelId),
+          };
+          persist();
+          void renderCanvas();
+          renderAppsMenu();
+          renderLayoutMenu();
+        },
+        suspendClickThrough: () => clickThrough.suspend(),
+      });
+      if (gen !== renderGeneration) return;
+      syncClickThrough();
+      return;
+    }
+
+    clearSplitArtifacts();
+    desktop.className = "desktop-canvas desktop-grid";
+    if (layoutEditing) desktop.classList.add("canvas-editing");
+    await renderTiles();
+    if (gen !== renderGeneration) return;
   };
 
   const refreshWindowFrame = async (): Promise<void> => {
     windowFrame = await captureWindowFrame();
     windowMode = windowFrame.mode;
     persist();
+  };
+
+  const assignOpenPanelsToEmptyLeaves = (): void => {
+    splitState = {
+      ...splitState,
+      tree: syncSplitTreeFromGridLayouts(
+        splitState.tree,
+        openPanelIds,
+        panelLayouts,
+        shell,
+      ),
+    };
+  };
+
+  const applyCanvasProfile = (profile: CanvasProfile): void => {
+    activeProfileId = profile.id;
+    canvasMode = profile.mode;
+    openPanelIds = dedupeOpenPanelIds(profile.openPanelIds);
+    if (profile.mode === "grid" && profile.grid) {
+      const applied = applyProfileToGrid(profile, shell);
+      if (applied) {
+        shell = applied.shell;
+        for (const key of Object.keys(panelLayouts)) {
+          delete panelLayouts[key];
+        }
+        Object.assign(panelLayouts, applied.panelLayouts);
+        openPanelIds = dedupeOpenPanelIds(applied.openPanelIds);
+        if (shell.snap_enabled) {
+          for (const id of openPanelIds) {
+            const layout = panelLayouts[id];
+            if (layout) {
+              panelLayouts[id] = {
+                ...layout,
+                pixelLock: undefined,
+                freeX: undefined,
+                freeY: undefined,
+              };
+            }
+          }
+        }
+      }
+    } else if (profile.mode === "split" && profile.split) {
+      const applied = applyProfileToSplit(profile);
+      if (applied) {
+        if (applied.shell) {
+          shell = { ...shell, ...applied.shell };
+        }
+        const tree = applied.tree;
+        openPanelIds = dedupeOpenPanelIds(allPanelIdsInTree(tree));
+        splitState = applied;
+        syncGlobalPanelLayoutsFromSplitTree(tree, panelLayouts);
+      }
+    }
+    applyShellCss(shellRoot, shell);
+    refreshGrid();
+    if (canvasMode === "grid") {
+      syncTilesFromLayouts();
+    }
+    persist();
+    void renderCanvas();
+    renderAppsMenu();
+    renderLayoutMenu();
+    syncLayoutInputs();
+  };
+
+  const saveCurrentLayout = async (): Promise<void> => {
+    const slotOptions = canvasProfiles.map((profile, index) => ({
+      slotIndex: index,
+      label: profile?.name ?? emptyProfileSlotName(index),
+      occupied: profile !== null,
+    }));
+    const emptySlot = canvasProfiles.findIndex((profile) => profile === null);
+    const defaultSlotIndex = emptySlot >= 0 ? emptySlot : 0;
+    const defaultName =
+      canvasProfiles[defaultSlotIndex]?.name ??
+      emptyProfileSlotName(defaultSlotIndex);
+
+    closeDropdowns();
+    const resumeClickThrough = clickThrough.suspend();
+    let result: { slotIndex: number; name: string } | null = null;
+    try {
+      result = await promptSaveLayout(
+        shellRoot,
+        slotOptions,
+        defaultSlotIndex,
+        defaultName,
+      );
+    } finally {
+      resumeClickThrough();
+    }
+    if (!result) return;
+
+    const { slotIndex, name } = result;
+    const existing = canvasProfiles[slotIndex];
+    if (canvasMode === "split") {
+      const tree = dedupePanelAssignmentsInTree(
+        syncSplitTreeFromDom(desktop, splitState.tree),
+      );
+      splitState = { ...splitState, tree };
+      openPanelIds = dedupeOpenPanelIds(allPanelIdsInTree(tree));
+    }
+    const profile =
+      canvasMode === "grid"
+        ? captureGridProfile(name, shell, panelLayouts, openPanelIds)
+        : captureSplitProfile(name, splitState, shell);
+    if (existing) {
+      profile.id = existing.id;
+    }
+    canvasProfiles = upsertProfile(canvasProfiles, slotIndex, profile);
+    activeProfileId = profile.id;
+    persist();
+    renderLayoutMenu();
+  };
+
+  function menuSectionHeader(label: string): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "menu-dropdown-section-header";
+    el.setAttribute("role", "presentation");
+    el.textContent = label;
+    return el;
+  }
+
+  const renderLayoutMenu = (): void => {
+    layoutPanel.innerHTML = "";
+
+    layoutPanel.append(menuSectionHeader("Saved layouts"));
+
+    for (let i = 0; i < MAX_CANVAS_PROFILES; i++) {
+      const profile = canvasProfiles[i];
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "menu-dropdown-row menu-dropdown-row-check";
+      row.role = "menuitemradio";
+      row.dataset.profileSlot = String(i);
+      if (profile) {
+        row.dataset.profileId = profile.id;
+        row.innerHTML =
+          '<span class="menu-dropdown-gutter menu-dropdown-check" aria-hidden="true"></span>' +
+          `<span class="menu-dropdown-text">${profile.name}</span>`;
+        syncMenuCheckRow(row, activeProfileId === profile.id);
+      } else {
+        row.disabled = true;
+        row.classList.add("menu-dropdown-row-empty");
+        row.innerHTML =
+          '<span class="menu-dropdown-gutter" aria-hidden="true"></span>' +
+          `<span class="menu-dropdown-text">${emptyProfileSlotName(i)} (empty)</span>`;
+      }
+      layoutPanel.append(row);
+    }
+
+    layoutPanel.append(menuSeparator());
+
+    const modeGrid = document.createElement("button");
+    modeGrid.type = "button";
+    modeGrid.className = "menu-dropdown-row menu-dropdown-row-check";
+    modeGrid.dataset.canvasMode = "grid";
+    modeGrid.innerHTML =
+      '<span class="menu-dropdown-gutter menu-dropdown-check" aria-hidden="true"></span><span class="menu-dropdown-text">Grid mode</span>';
+    syncMenuCheckRow(modeGrid, canvasMode === "grid");
+    layoutPanel.append(modeGrid);
+
+    const modeSplit = document.createElement("button");
+    modeSplit.type = "button";
+    modeSplit.className = "menu-dropdown-row menu-dropdown-row-check";
+    modeSplit.dataset.canvasMode = "split";
+    modeSplit.innerHTML =
+      '<span class="menu-dropdown-gutter menu-dropdown-check" aria-hidden="true"></span><span class="menu-dropdown-text">Layout mode</span>';
+    syncMenuCheckRow(modeSplit, canvasMode === "split");
+    layoutPanel.append(modeSplit);
+
+    layoutPanel.append(menuSeparator());
+    layoutPanel.append(menuSectionHeader("Presets"));
+    for (const preset of BUILT_IN_PRESETS) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "menu-dropdown-row";
+      row.dataset.splitPreset = preset.id;
+      row.innerHTML =
+        '<span class="menu-dropdown-gutter" aria-hidden="true"></span>' +
+        `<span class="menu-dropdown-text">${preset.label}</span>`;
+      layoutPanel.append(row);
+    }
+
+    layoutPanel.append(menuSeparator());
+
+    const editRow = document.createElement("button");
+    editRow.type = "button";
+    editRow.className = "menu-dropdown-row";
+    editRow.dataset.layoutAction = layoutEditing ? "done" : "edit";
+    editRow.innerHTML =
+      '<span class="menu-dropdown-gutter" aria-hidden="true"></span>' +
+      `<span class="menu-dropdown-text">${layoutEditing ? "Done editing" : "Edit canvas…"}</span>`;
+    layoutPanel.append(editRow);
+
+    const saveRow = document.createElement("button");
+    saveRow.type = "button";
+    saveRow.className = "menu-dropdown-row";
+    saveRow.dataset.layoutAction = "save";
+    saveRow.innerHTML =
+      '<span class="menu-dropdown-gutter" aria-hidden="true"></span><span class="menu-dropdown-text">Save current as…</span>';
+    layoutPanel.append(saveRow);
+
+    layoutPanel.append(menuSeparator());
+    layoutPanel.append(menuSectionHeader("Grid"));
+
+    const cellLabel = document.createElement("label");
+    cellLabel.className =
+      "menu-dropdown-row menu-dropdown-row-value menu-dropdown-row-sizes";
+    cellLabel.innerHTML = `
+        <span class="menu-dropdown-gutter" aria-hidden="true"></span>
+        <span class="menu-dropdown-text">Cell Size</span>
+        <div class="menu-dropdown-values">
+          <input type="number" class="menu-dropdown-value" min="1" max="256" step="any" inputmode="numeric" data-setting="cell_pixels" aria-label="Cell size" />
+          <span class="menu-dropdown-inline-label">Step</span>
+          <input type="number" class="menu-dropdown-value" min="1" max="256" step="any" inputmode="numeric" data-setting="cell_step" aria-label="Cell size step" />
+        </div>`;
+    layoutPanel.append(cellLabel);
+
+    for (const key of ["snap_enabled", "show_grid"] as LayoutToggleKey[]) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "menu-dropdown-row menu-dropdown-row-check";
+      row.dataset.setting = key;
+      row.role = "menuitemcheckbox";
+      row.innerHTML =
+        '<span class="menu-dropdown-gutter menu-dropdown-check" aria-hidden="true"></span>' +
+        `<span class="menu-dropdown-text">${key === "snap_enabled" ? "Snap to Grid" : "Show Grid Lines"}</span>`;
+      syncMenuCheckRow(row, shell[key]);
+      layoutPanel.append(row);
+    }
+
+    layoutPanel.append(menuSeparator());
+    layoutPanel.append(menuSectionHeader("Split layout"));
+
+    const sashSnapRow = document.createElement("button");
+    sashSnapRow.type = "button";
+    sashSnapRow.className = "menu-dropdown-row menu-dropdown-row-check";
+    sashSnapRow.dataset.setting = "sash_snap_enabled";
+    sashSnapRow.role = "menuitemcheckbox";
+    sashSnapRow.innerHTML =
+      '<span class="menu-dropdown-gutter menu-dropdown-check" aria-hidden="true"></span>' +
+      '<span class="menu-dropdown-text">Snap Layout Lines</span>';
+    syncMenuCheckRow(sashSnapRow, shell.sash_snap_enabled);
+    layoutPanel.append(sashSnapRow);
+
+    wireLayoutMenuInputs();
+  };
+
+  function menuSeparator(): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "menu-dropdown-separator";
+    el.setAttribute("role", "separator");
+    return el;
+  }
+
+  const wireLayoutMenuInputs = (): void => {
+    const cellPixelsInput = layoutPanel.querySelector<HTMLInputElement>(
+      '[data-setting="cell_pixels"]',
+    );
+    const cellStepInput = layoutPanel.querySelector<HTMLInputElement>(
+      '[data-setting="cell_step"]',
+    );
+    if (!cellPixelsInput || !cellStepInput) return;
+
+    const syncCellPixels = wireBoundedNumericInput({
+      input: cellPixelsInput,
+      min: 1,
+      max: CELL_PIXELS_MAX,
+      getCurrent: () => shell.cell_pixels,
+      arrowStep: () => clampCellStep(shell.cell_step),
+      onCommit: (next) => {
+        cellPixelsInput.value = String(next);
+        if (next !== shell.cell_pixels)
+          applyShellSetting("cell_pixels", String(next));
+      },
+    });
+
+    const syncCellStep = wireBoundedNumericInput({
+      input: cellStepInput,
+      min: 1,
+      max: CELL_STEP_MAX,
+      getCurrent: () => shell.cell_step,
+      arrowStep: () => 1,
+      onCommit: (next) => {
+        cellStepInput.value = String(next);
+        if (next !== shell.cell_step) {
+          shell.cell_step = next;
+          persist();
+          syncLayoutInputs();
+        }
+      },
+    });
+
+    syncCellPixels();
+    syncCellStep();
+  };
+
+  const syncLayoutInputs = (): void => {
+    renderLayoutMenu();
   };
 
   const renderAppsMenu = (): void => {
@@ -529,12 +971,19 @@ export async function initShell(): Promise<void> {
   };
 
   const renderTiles = async (): Promise<void> => {
+    refreshGrid();
     removeClosedTiles();
+    removeOrphanPanelTiles(new Set(openPanelIds));
     for (const tile of tiles) {
       let el = desktop.querySelector<HTMLElement>(
-        `[data-panel-id="${tile.id}"]`,
+        `:scope > .panel-tile[data-panel-id="${tile.id}"]`,
       );
       if (!el) {
+        for (const orphan of desktop.querySelectorAll<HTMLElement>(
+          `[data-panel-id="${tile.id}"]`,
+        )) {
+          orphan.remove();
+        }
         el = document.createElement("article");
         el.className = "panel-tile";
         el.dataset.panelId = tile.id;
@@ -569,20 +1018,7 @@ export async function initShell(): Promise<void> {
     syncClickThrough();
   };
 
-  const cellPixelsInput = settingsPanel.querySelector<HTMLInputElement>(
-    '[data-setting="cell_pixels"]',
-  )!;
-  const cellStepInput = settingsPanel.querySelector<HTMLInputElement>(
-    '[data-setting="cell_step"]',
-  )!;
-
-  const syncCellSizeInputs = (): void => {
-    cellPixelsInput.value = String(clampCellPixels(shell.cell_pixels));
-    cellStepInput.value = String(clampCellStep(shell.cell_step));
-  };
-
   const syncSettingsInputs = (): void => {
-    syncCellSizeInputs();
     for (const key of SHELL_TOGGLE_KEYS) {
       const row = settingsPanel.querySelector<HTMLElement>(
         `[data-setting="${key}"]`,
@@ -604,104 +1040,118 @@ export async function initShell(): Promise<void> {
   };
 
   const applyShellSetting = (
-    key: "cell_pixels" | "snap_enabled" | "show_grid",
+    key: "cell_pixels" | "snap_enabled" | "show_grid" | "sash_snap_enabled",
     rawValue?: string | boolean,
   ): void => {
-    if (key === "snap_enabled" || key === "show_grid") {
+    if (
+      key === "snap_enabled" ||
+      key === "show_grid" ||
+      key === "sash_snap_enabled"
+    ) {
       shell[key] = typeof rawValue === "boolean" ? rawValue : !shell[key];
     } else {
       shell.cell_pixels = clampCellPixels(Number(rawValue));
     }
     applyShellCss(shellRoot, shell);
-    syncSettingsInputs();
 
     const prevMetrics = gridMetrics;
-    refreshGrid();
 
     if (key === "cell_pixels") {
-      tiles = tiles.map((t) =>
-        lockTilePixels(t, prevMetrics, shell.snap_enabled),
-      );
-    } else if (shell.snap_enabled) {
+      const origin = desktop.getBoundingClientRect();
       tiles = tiles.map((t) => {
-        if (t.freeX !== undefined && t.freeY !== undefined) {
-          const origin = desktop.getBoundingClientRect();
-          const cell = pointerToGridCell(
-            origin.left + t.freeX,
-            origin.top + t.freeY,
-            desktop,
-            gridMetrics,
-          );
-          return clampTile(
-            {
-              ...t,
-              col: cell.col,
-              row: cell.row,
-              freeX: undefined,
-              freeY: undefined,
+        const el = desktop.querySelector<HTMLElement>(
+          `:scope > .panel-tile[data-panel-id="${t.id}"]`,
+        );
+        if (el) {
+          const r = el.getBoundingClientRect();
+          return {
+            ...t,
+            pixelLock: {
+              left: r.left - origin.left,
+              top: r.top - origin.top,
+              width: r.width,
+              height: r.height,
             },
+            freeX: undefined,
+            freeY: undefined,
+          };
+        }
+        return lockTilePixels(t, prevMetrics, shell.snap_enabled);
+      });
+    }
+
+    refreshGrid();
+
+    if (key === "snap_enabled") {
+      if (shell.snap_enabled) {
+        tiles = tiles.map((t) => {
+          if (t.freeX !== undefined && t.freeY !== undefined) {
+            const origin = desktop.getBoundingClientRect();
+            const cell = pointerToGridCell(
+              origin.left + t.freeX,
+              origin.top + t.freeY,
+              desktop,
+              gridMetrics,
+            );
+            return clampTile(
+              {
+                ...t,
+                col: cell.col,
+                row: cell.row,
+                freeX: undefined,
+                freeY: undefined,
+              },
+              gridMetrics,
+            );
+          }
+          return clampTile(
+            { ...t, freeX: undefined, freeY: undefined },
             gridMetrics,
           );
-        }
-        return clampTile(
-          { ...t, freeX: undefined, freeY: undefined },
-          gridMetrics,
-        );
-      });
-    } else {
-      tiles = tiles.map((t) => {
-        if (t.freeX !== undefined && t.freeY !== undefined)
-          return clampTile(t, gridMetrics);
-        const rect = tileSnapRect(t, gridMetrics);
-        return clampTile(
-          { ...t, freeX: rect.left, freeY: rect.top },
-          gridMetrics,
-        );
-      });
+        });
+      } else {
+        tiles = tiles.map((t) => {
+          if (t.freeX !== undefined && t.freeY !== undefined)
+            return clampTile(t, gridMetrics);
+          const rect = tileSnapRect(t, gridMetrics);
+          return clampTile(
+            { ...t, freeX: rect.left, freeY: rect.top },
+            gridMetrics,
+          );
+        });
+      }
     }
 
     tiles.forEach((t) => {
       panelLayouts[t.id] = t;
     });
-    void renderTiles();
+    if (canvasMode === "split") {
+      splitState = {
+        ...splitState,
+        tree: syncSubGridSettingsFromShell(
+          splitState.tree,
+          shell,
+          key === "cell_pixels" ? prevMetrics.cellSize : undefined,
+        ),
+      };
+    }
+    persist();
+    void renderCanvas();
   };
-
-  wireBoundedNumericInput({
-    input: cellPixelsInput,
-    min: 1,
-    max: CELL_PIXELS_MAX,
-    getCurrent: () => shell.cell_pixels,
-    arrowStep: () => clampCellStep(shell.cell_step),
-    onCommit: (next) => {
-      cellPixelsInput.value = String(next);
-      if (next !== shell.cell_pixels) {
-        applyShellSetting("cell_pixels", String(next));
-      }
-    },
-  });
-
-  wireBoundedNumericInput({
-    input: cellStepInput,
-    min: 1,
-    max: CELL_STEP_MAX,
-    getCurrent: () => shell.cell_step,
-    arrowStep: () => 1,
-    onCommit: (next) => {
-      cellStepInput.value = String(next);
-      if (next !== shell.cell_step) {
-        shell.cell_step = next;
-        persist();
-        syncCellSizeInputs();
-      }
-    },
-  });
 
   syncSettingsInputs();
   renderAppsMenu();
-  await renderTiles();
+  renderLayoutMenu();
+  if (layoutEditing) {
+    shellRoot.classList.add("canvas-editing");
+    layoutMenuBtn.classList.add("is-editing");
+    editClickThroughResume = clickThrough.suspend();
+  }
+  await renderCanvas();
 
   const closeDropdowns = (): void => {
     setDropdownOpen(settingsPanel, false);
+    setDropdownOpen(layoutPanel, false);
     setDropdownOpen(appsPanel, false);
     syncClickThrough();
   };
@@ -716,19 +1166,21 @@ export async function initShell(): Promise<void> {
       syncClickThrough();
     });
 
+  layoutMenuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const willOpen = layoutPanel.hidden;
+    closeDropdowns();
+    if (willOpen) renderLayoutMenu();
+    setDropdownOpen(layoutPanel, willOpen);
+    syncClickThrough();
+  });
+
   app.querySelector('[data-menu="apps"]')!.addEventListener("click", (e) => {
     e.stopPropagation();
     const willOpen = appsPanel.hidden;
     closeDropdowns();
     setDropdownOpen(appsPanel, willOpen);
     syncClickThrough();
-  });
-
-  settingsPanel.addEventListener("change", (event) => {
-    const target = event.target as HTMLInputElement;
-    const key = target.dataset.setting;
-    if (key !== "cell_pixels" && key !== "cell_step") return;
-    target.blur();
   });
 
   settingsPanel.addEventListener("click", (event) => {
@@ -739,10 +1191,81 @@ export async function initShell(): Promise<void> {
     const key = row.dataset.setting;
     if (key === "click_through" || key === "always_on_top") {
       applyWindowPref(key);
+    }
+  });
+
+  layoutPanel.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    const row = target.closest<HTMLButtonElement>(".menu-dropdown-row");
+    if (!row || row.disabled) return;
+
+    const profileId = row.dataset.profileId;
+    if (profileId) {
+      const profile = canvasProfiles.find((p) => p?.id === profileId);
+      if (profile) applyCanvasProfile(profile);
       return;
     }
-    if (key === "snap_enabled" || key === "show_grid") {
-      applyShellSetting(key);
+
+    const mode = row.dataset.canvasMode as CanvasMode | undefined;
+    if (mode && mode !== canvasMode) {
+      canvasMode = mode;
+      if (mode === "split") {
+        assignOpenPanelsToEmptyLeaves();
+      } else {
+        const synced = syncGridLayoutsFromSplitTree(
+          splitState.tree,
+          openPanelIds,
+          panelLayouts,
+          (id, i) => defaultTile(id, i, gridMetrics),
+        );
+        openPanelIds = synced.openPanelIds;
+        Object.assign(panelLayouts, synced.panelLayouts);
+        syncTilesFromLayouts();
+      }
+      activeProfileId = null;
+      persist();
+      void renderCanvas();
+      renderLayoutMenu();
+      return;
+    }
+
+    const preset = row.dataset.splitPreset as BuiltInPreset | undefined;
+    if (preset) {
+      if (canvasMode !== "split") {
+        canvasMode = "split";
+      }
+      splitState = createSplitFromPreset(preset, openPanelIds);
+      activeProfileId = null;
+      persist();
+      void renderCanvas();
+      renderLayoutMenu();
+      return;
+    }
+
+    const action = row.dataset.layoutAction;
+    if (action === "edit") {
+      setLayoutEditing(true);
+      closeDropdowns();
+      return;
+    }
+    if (action === "done") {
+      setLayoutEditing(false);
+      closeDropdowns();
+      return;
+    }
+    if (action === "save") {
+      void saveCurrentLayout();
+      return;
+    }
+
+    const setting = row.dataset.setting;
+    if (
+      setting === "snap_enabled" ||
+      setting === "show_grid" ||
+      setting === "sash_snap_enabled"
+    ) {
+      applyShellSetting(setting);
+      renderLayoutMenu();
     }
   });
 
@@ -758,8 +1281,10 @@ export async function initShell(): Promise<void> {
     refreshWindowFrame,
     onLayoutChanged: () => {
       refreshGrid();
-      tiles = tiles.map((t) => clampTile(t, gridMetrics));
-      void renderTiles();
+      if (canvasMode === "grid") {
+        tiles = tiles.map((t) => clampTile(t, gridMetrics));
+      }
+      void renderCanvas();
       syncClickThrough();
     },
     onMenuDockDrag: (endEvent) => {
@@ -798,8 +1323,10 @@ export async function initShell(): Promise<void> {
 
   window.addEventListener("resize", () => {
     refreshGrid();
-    tiles = tiles.map((t) => clampTile(t, gridMetrics));
-    void renderTiles();
+    if (canvasMode === "grid") {
+      tiles = tiles.map((t) => clampTile(t, gridMetrics));
+    }
+    void renderCanvas();
   });
 
   appsPanel.addEventListener("click", async (event) => {
@@ -818,25 +1345,37 @@ export async function initShell(): Promise<void> {
           gridMetrics,
         );
       }
+      if (canvasMode === "split") {
+        assignOpenPanelsToEmptyLeaves();
+      }
     } else {
       panelLayouts[panelId] =
         tiles.find((t) => t.id === panelId) ?? panelLayouts[panelId];
       openPanelIds = openPanelIds.filter((id) => id !== panelId);
+      if (canvasMode === "split") {
+        splitState = {
+          ...splitState,
+          tree: removePanelFromTree(splitState.tree, panelId),
+        };
+      }
     }
     syncTilesFromLayouts();
-    await renderTiles();
+    await renderCanvas();
     renderAppsMenu();
+    renderLayoutMenu();
   });
 
   desktop.addEventListener("click", async (event) => {
+    if (canvasMode !== "grid") return;
     const closeId = (event.target as HTMLElement).dataset.close;
     if (!closeId) return;
     panelLayouts[closeId] =
       tiles.find((t) => t.id === closeId) ?? panelLayouts[closeId];
     openPanelIds = openPanelIds.filter((id) => id !== closeId);
     syncTilesFromLayouts();
-    await renderTiles();
+    await renderCanvas();
     renderAppsMenu();
+    renderLayoutMenu();
   });
 
   let tileDrag: {
@@ -893,8 +1432,14 @@ export async function initShell(): Promise<void> {
     const tile = tiles.find((t) => t.id === tileResize!.id);
     if (!tile) return;
     const endCell = pointerToGridCell(clientX, clientY, desktop, gridMetrics);
-    const colSpan = Math.max(MIN_TILE_COLS, endCell.col - tile.col + 1);
-    const rowSpan = Math.max(MIN_TILE_ROWS, endCell.row - tile.row + 1);
+    const colSpan = Math.max(
+      minTileColSpan(gridMetrics),
+      endCell.col - tile.col + 1,
+    );
+    const rowSpan = Math.max(
+      minTileRowSpan(gridMetrics),
+      endCell.row - tile.row + 1,
+    );
     const next = clampTile(
       { ...tile, colSpan, rowSpan, pixelLock: undefined },
       gridMetrics,
@@ -905,6 +1450,7 @@ export async function initShell(): Promise<void> {
   };
 
   desktop.addEventListener("pointerdown", (event) => {
+    if (canvasMode !== "grid") return;
     const target = event.target as HTMLElement;
 
     const handle = target.closest(".panel-resize-handle");

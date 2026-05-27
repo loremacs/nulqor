@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 
 const INTERACTIVE_SELECTOR =
-  ".menu-bar, .panel-tile, .menu-dropdown:not([hidden])";
+  ".menu-bar, .panel-tile, .menu-dropdown:not([hidden]), .shell-modal-backdrop, .split-sash, .split-slot-edit-bar, .split-slot-edit-bar button";
 const POLL_MS = 16;
 const HITBOX_PAD_PX = 2;
 
