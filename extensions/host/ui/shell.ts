@@ -458,6 +458,25 @@ export async function initShell(): Promise<void> {
     clickThrough.refresh();
   };
 
+  /** Keep dragged panel above siblings; persist stack in openPanelIds / tiles. */
+  const syncPanelStackOrder = (panelId: string): void => {
+    openPanelIds = [...openPanelIds.filter((id) => id !== panelId), panelId];
+    const tile = tiles.find((t) => t.id === panelId);
+    if (tile) {
+      tiles = [...tiles.filter((t) => t.id !== panelId), tile];
+    }
+  };
+
+  const raiseGridPanel = (tileEl: HTMLElement, panelId: string): void => {
+    tileEl.classList.add("panel-tile-dragging");
+    desktop.appendChild(tileEl);
+    syncPanelStackOrder(panelId);
+  };
+
+  const finishGridPanelDrag = (tileEl: HTMLElement): void => {
+    tileEl.classList.remove("panel-tile-dragging");
+  };
+
   const applyAlwaysOnTop = async (on: boolean): Promise<void> => {
     try {
       await getCurrentWindow().setAlwaysOnTop(on);
@@ -1460,6 +1479,8 @@ export async function initShell(): Promise<void> {
       const id = tileEl.dataset.panelId!;
       if (!isPanelResizable(id)) return;
       tileResize = { id, el: tileEl };
+      desktop.appendChild(tileEl);
+      syncPanelStackOrder(id);
       event.preventDefault();
       const resumeClickThrough = clickThrough.suspend();
       trackPointerSession(
@@ -1485,6 +1506,7 @@ export async function initShell(): Promise<void> {
       pointerOffsetX: event.clientX - tileRect.left,
       pointerOffsetY: event.clientY - tileRect.top,
     };
+    raiseGridPanel(tileEl, id);
     event.preventDefault();
     const resumeClickThrough = clickThrough.suspend();
     trackPointerSession(
@@ -1498,6 +1520,7 @@ export async function initShell(): Promise<void> {
       (endEvent) => {
         const dragged = tiles.find((t) => t.id === tileDrag!.id);
         if (!dragged) {
+          finishGridPanelDrag(tileDrag!.el);
           tileDrag = null;
           resumeClickThrough();
           syncClickThrough();
@@ -1519,6 +1542,7 @@ export async function initShell(): Promise<void> {
           tiles = tiles.map((t) => (t.id === tileDrag!.id ? resolved! : t));
           panelLayouts[resolved.id] = resolved;
         }
+        finishGridPanelDrag(tileDrag!.el);
         tileDrag = null;
         persist();
         resumeClickThrough();

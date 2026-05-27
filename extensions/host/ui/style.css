@@ -1013,6 +1013,7 @@ body,
 }
 
 .panel-tile-dragging {
+  z-index: 10;
   opacity: 0.65;
   cursor: grabbing !important;
   pointer-events: none;

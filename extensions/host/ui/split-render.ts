@@ -72,9 +72,8 @@ function resolvePanelSourceLeafId(
   const panelEl = desktop.querySelector<HTMLElement>(
     `.panel-tile[data-panel-id="${panelId}"]`,
   );
-  const domLeafId = panelEl?.closest<HTMLElement>(
-    ".split-slot[data-leaf-id]",
-  )?.dataset.leafId;
+  const domLeafId = panelEl?.closest<HTMLElement>(".split-slot[data-leaf-id]")
+    ?.dataset.leafId;
   // DOM slot is authoritative — tree may lag after profile load / incremental moves.
   if (domLeafId) return domLeafId;
   return findLeafOwningPanel(tree, panelId)?.id ?? null;
@@ -147,7 +146,9 @@ function resolveDropTargetLeafId(
 }
 
 function clearDropTargets(): void {
-  for (const slot of document.querySelectorAll<HTMLElement>(".split-slot.is-drop-target")) {
+  for (const slot of document.querySelectorAll<HTMLElement>(
+    ".split-slot.is-drop-target",
+  )) {
     slot.classList.remove("is-drop-target");
   }
 }
@@ -162,8 +163,8 @@ function persistSplitTree(opts: SplitRenderOptions, tree: SplitNode): void {
 
 function simpleSlotPanelId(slot: HTMLElement): string | null {
   return (
-    slot.querySelector<HTMLElement>(":scope > .panel-tile[data-panel-id]")?.dataset
-      .panelId ?? null
+    slot.querySelector<HTMLElement>(":scope > .panel-tile[data-panel-id]")
+      ?.dataset.panelId ?? null
   );
 }
 
@@ -210,6 +211,7 @@ function executePanelDrop(
     panelId,
     targetLeafId,
     opts.panelLayouts,
+    sourceLeafId,
   );
   commitPanelMove(opts, next, {
     panelId,
@@ -219,7 +221,10 @@ function executePanelDrop(
   });
 }
 
-function applySimpleSlotPanelStyle(tileEl: HTMLElement, layoutEditing: boolean): void {
+function applySimpleSlotPanelStyle(
+  tileEl: HTMLElement,
+  layoutEditing: boolean,
+): void {
   tileEl.style.position = layoutEditing ? "relative" : "absolute";
   if (layoutEditing) {
     tileEl.style.flex = "1 1 auto";
@@ -315,7 +320,7 @@ export function applySplitPanelMoveInDom(
       snap_enabled: sub.snap_enabled,
       show_grid: sub.show_grid,
     };
-    const metrics = updateGridGeometry(opts.shellRoot, gridHost, subShell);
+    const metrics = updateGridGeometry(opts.shellRoot, gridHost, subShell, gridHost);
     let layout = sub.panelLayouts[pid];
     if (!layout) return false;
     layout = clampTileToDesk(
@@ -330,29 +335,22 @@ export function applySplitPanelMoveInDom(
     }
     gridHost.append(tileEl);
     applyTileStyle(tileEl, tileDisplayRect(layout, metrics, sub.snap_enabled));
-    wireSubGridPanelDrag(
-      tileEl,
-      pid,
-      leaf.id,
-      gridHost,
-      opts,
-      getTree,
-      () => {
-        const live = findLeaf(getTree(), leaf.id)?.subGrid;
-        const subShell: ShellConfig = {
-          ...opts.shell,
-          cell_pixels: live?.cell_pixels ?? sub.cell_pixels,
-          snap_enabled: live?.snap_enabled ?? sub.snap_enabled,
-          show_grid: live?.show_grid ?? sub.show_grid,
-        };
-        return updateGridGeometry(opts.shellRoot, gridHost, subShell);
-      },
-    );
+    wireSubGridPanelDrag(tileEl, pid, leaf.id, gridHost, opts, getTree, () => {
+      const live = findLeaf(getTree(), leaf.id)?.subGrid;
+      const subShell: ShellConfig = {
+        ...opts.shell,
+        cell_pixels: live?.cell_pixels ?? sub.cell_pixels,
+        snap_enabled: live?.snap_enabled ?? sub.snap_enabled,
+        show_grid: live?.show_grid ?? sub.show_grid,
+      };
+        return updateGridGeometry(opts.shellRoot, gridHost, subShell, gridHost);
+    });
     return true;
   };
 
   if (targetLeaf.subGrid?.enabled) {
-    if (!placeInSubGridSlot(targetSlot, targetLeaf, panelId, panelEl)) return false;
+    if (!placeInSubGridSlot(targetSlot, targetLeaf, panelId, panelEl))
+      return false;
     panelEl.dataset.sourceLeafId = targetLeafId;
   } else {
     placeInSimpleSlot(targetSlot, panelEl);
@@ -374,7 +372,14 @@ export function applySplitPanelMoveInDom(
       sourceLeaf.subGrid?.enabled &&
       sourceLeaf.subGrid.openPanelIds.includes(displacedPanelId)
     ) {
-      if (!placeInSubGridSlot(sourceSlot, sourceLeaf, displacedPanelId, displacedEl)) {
+      if (
+        !placeInSubGridSlot(
+          sourceSlot,
+          sourceLeaf,
+          displacedPanelId,
+          displacedEl,
+        )
+      ) {
         return false;
       }
       displacedEl.dataset.sourceLeafId = sourceLeafId;
@@ -382,7 +387,13 @@ export function applySplitPanelMoveInDom(
       placeInSimpleSlot(sourceSlot, displacedEl);
       displacedEl.dataset.sourceLeafId = sourceLeafId;
       if (opts.allowSlotDrag) {
-        wireSlotPanelDrag(displacedEl, displacedPanelId, sourceLeafId, opts, getTree);
+        wireSlotPanelDrag(
+          displacedEl,
+          displacedPanelId,
+          sourceLeafId,
+          opts,
+          getTree,
+        );
       }
     } else {
       return false;
@@ -403,14 +414,20 @@ function commitPanelMove(
     persistSplitTree(opts, tree);
     return;
   }
-  // Incremental patch failed — preserve live DOM for other panels, then re-apply this move.
-  const domTree = syncSplitTreeFromDom(opts.desktop, opts.split.tree);
+  // Incremental patch failed — sync DOM, retry once, full rebuild only as last resort.
+  const liveTree = resolveTree(opts);
+  const domTree = syncSplitTreeFromDom(opts.desktop, liveTree);
   const merged = movePanelToLeaf(
     domTree,
     move.panelId,
     move.targetLeafId,
     opts.panelLayouts,
+    move.sourceLeafId,
   );
+  if (opts.tryPanelMove?.(merged, move)) {
+    persistSplitTree(opts, merged);
+    return;
+  }
   opts.onTreeChange(merged, "custom");
 }
 
@@ -431,7 +448,7 @@ function wireSlotPanelDrag(
   if (header.dataset.slotDragWired === "1") return;
   header.dataset.slotDragWired = "1";
 
-    header.addEventListener("pointerdown", (event) => {
+  header.addEventListener("pointerdown", (event) => {
     if ((event.target as HTMLElement).closest("button")) return;
     event.preventDefault();
     header.setPointerCapture(event.pointerId);
@@ -492,16 +509,24 @@ function wireSlotPanelDrag(
   });
 }
 
-function defaultSubGridTile(id: string, index: number, metrics: GridMetrics): TileLayout {
+function defaultSubGridTile(
+  id: string,
+  index: number,
+  metrics: GridMetrics,
+): TileLayout {
   const colSpan = Math.min(4, metrics.cols);
   const rowSpan = Math.min(3, metrics.rows);
   const col = 1 + (index % Math.max(1, metrics.cols - colSpan + 1));
-  const row = 1 + Math.floor(index / Math.max(1, metrics.cols - colSpan + 1)) * rowSpan;
+  const row =
+    1 + Math.floor(index / Math.max(1, metrics.cols - colSpan + 1)) * rowSpan;
   return { id, col, row, colSpan, rowSpan };
 }
 
 /** Convert saved pixelLock / legacy layouts into clamped grid cells for this sub-grid host. */
-function normalizeSubGridTile(tile: TileLayout, metrics: GridMetrics): TileLayout {
+function normalizeSubGridTile(
+  tile: TileLayout,
+  metrics: GridMetrics,
+): TileLayout {
   const base = tile.pixelLock
     ? {
         ...tileLayoutFromPixelRect(tile.pixelLock, metrics, tile.id),
@@ -542,7 +567,20 @@ async function mountPanelTile(
     draggable: boolean;
     onClose: () => void;
   },
+  preserved?: Map<string, HTMLElement>,
 ): Promise<HTMLElement> {
+  const existing = preserved?.get(panelId);
+  if (existing) {
+    preserved!.delete(panelId);
+    const header = existing.querySelector<HTMLElement>(".panel-tile-header");
+    if (header) {
+      delete header.dataset.slotDragWired;
+      delete header.dataset.subGridDragWired;
+    }
+    host.append(existing);
+    return existing;
+  }
+
   const el = document.createElement("article");
   el.className = "panel-tile panel-tile-split";
   el.dataset.panelId = panelId;
@@ -574,6 +612,19 @@ async function mountPanelTile(
   return el;
 }
 
+function detachPanelTiles(desktop: HTMLElement): Map<string, HTMLElement> {
+  const map = new Map<string, HTMLElement>();
+  for (const el of desktop.querySelectorAll<HTMLElement>(
+    ".panel-tile[data-panel-id]",
+  )) {
+    const id = el.dataset.panelId;
+    if (!id || map.has(id)) continue;
+    el.remove();
+    map.set(id, el);
+  }
+  return map;
+}
+
 async function renderSubGrid(
   leafEl: HTMLElement,
   leafNode: SplitLeaf,
@@ -581,6 +632,7 @@ async function renderSubGrid(
   shellRoot: HTMLElement,
   opts: SplitRenderOptions,
   getTree: () => SplitNode,
+  preserved?: Map<string, HTMLElement>,
 ): Promise<void> {
   const leafId = leafNode.id;
   const gridHost = document.createElement("div");
@@ -598,7 +650,7 @@ async function renderSubGrid(
     };
   };
 
-  let metrics = updateGridGeometry(shellRoot, gridHost, subGridShell());
+  let metrics = updateGridGeometry(shellRoot, gridHost, subGridShell(), gridHost);
 
   const panelIds = () =>
     subGridForLeaf(getTree, leafId)?.openPanelIds.filter(Boolean) ?? [];
@@ -612,13 +664,18 @@ async function renderSubGrid(
       metrics,
     );
     sub.panelLayouts[pid] = tile;
-    const el = await mountPanelTile(pid, gridHost, {
-      draggable: true,
-      onClose: () => opts.onClosePanel(pid),
-    });
+    const el = await mountPanelTile(
+      pid,
+      gridHost,
+      {
+        draggable: true,
+        onClose: () => opts.onClosePanel(pid),
+      },
+      preserved,
+    );
     applyTileStyle(el, tileDisplayRect(tile, metrics, sub.snap_enabled));
     wireSubGridPanelDrag(el, pid, leafId, gridHost, opts, getTree, () => {
-      metrics = updateGridGeometry(shellRoot, gridHost, subGridShell());
+      metrics = updateGridGeometry(shellRoot, gridHost, subGridShell(), gridHost);
       return metrics;
     });
   }
@@ -650,11 +707,29 @@ function wireSubGridPanelDrag(
       const sub = subGridForLeaf(getTree, leafId);
       const tile = sub?.panelLayouts[id];
       if (!tile || !sub) return;
-      const endCell = pointerToGridCell(e.clientX, e.clientY, gridHost, metrics);
-      const colSpan = Math.max(minTileColSpan(metrics), endCell.col - tile.col + 1);
-      const rowSpan = Math.max(minTileRowSpan(metrics), endCell.row - tile.row + 1);
+      const endCell = pointerToGridCell(
+        e.clientX,
+        e.clientY,
+        gridHost,
+        metrics,
+      );
+      const colSpan = Math.max(
+        minTileColSpan(metrics),
+        endCell.col - tile.col + 1,
+      );
+      const rowSpan = Math.max(
+        minTileRowSpan(metrics),
+        endCell.row - tile.row + 1,
+      );
       const next = clampTileToDesk(
-        { ...tile, colSpan, rowSpan, pixelLock: undefined, freeX: undefined, freeY: undefined },
+        {
+          ...tile,
+          colSpan,
+          rowSpan,
+          pixelLock: undefined,
+          freeX: undefined,
+          freeY: undefined,
+        },
         metrics,
       );
       sub.panelLayouts[id] = next;
@@ -898,7 +973,9 @@ function updateSashSnapPreviewDuringDrag(
   const sashCenterClient = isHorizontal
     ? containerRect.left + boundaryLocal + SASH_THICKNESS_PX / 2
     : containerRect.top + boundaryLocal + SASH_THICKNESS_PX / 2;
-  const sashClass = isHorizontal ? "split-sash-vertical" : "split-sash-horizontal";
+  const sashClass = isHorizontal
+    ? "split-sash-vertical"
+    : "split-sash-horizontal";
   const targets = collectSashSnapTargets(opts.desktop, sashClass, sash);
   const snapTarget = findSnapTarget(
     sashCenterClient,
@@ -1054,7 +1131,10 @@ function renderEditChrome(
   });
   bar.querySelector("[data-subgrid]")!.addEventListener("click", (e) => {
     e.stopPropagation();
-    opts.onTreeChange(toggleLeafSubGrid(getTree(), leafId, opts.shell), "custom");
+    opts.onTreeChange(
+      toggleLeafSubGrid(getTree(), leafId, opts.shell),
+      "custom",
+    );
   });
 
   slot.append(bar);
@@ -1065,6 +1145,7 @@ async function renderNode(
   host: HTMLElement,
   opts: SplitRenderOptions,
   getTree: () => SplitNode,
+  preserved?: Map<string, HTMLElement>,
 ): Promise<void> {
   if (node.type === "leaf") {
     const slot = document.createElement("div");
@@ -1079,15 +1160,28 @@ async function renderNode(
     }
 
     if (node.subGrid?.enabled) {
-      await renderSubGrid(slot, node, opts.shell, opts.shellRoot, opts, getTree);
+      await renderSubGrid(
+        slot,
+        node,
+        opts.shell,
+        opts.shellRoot,
+        opts,
+        getTree,
+        preserved,
+      );
       return;
     }
 
     if (node.panelId) {
-      const tile = await mountPanelTile(node.panelId, slot, {
-        draggable: opts.allowSlotDrag,
-        onClose: () => opts.onClosePanel(node.panelId!),
-      });
+      const tile = await mountPanelTile(
+        node.panelId,
+        slot,
+        {
+          draggable: opts.allowSlotDrag,
+          onClose: () => opts.onClosePanel(node.panelId!),
+        },
+        preserved,
+      );
       wireSlotPanelDrag(tile, node.panelId, node.id, opts, getTree);
       applySimpleSlotPanelStyle(tile, opts.layoutEditing);
     } else if (opts.layoutEditing) {
@@ -1105,7 +1199,8 @@ async function renderNode(
   container.dataset.interactive = "true";
   container.style.flex = "1 1 0";
   container.style.display = "flex";
-  container.style.flexDirection = node.direction === "horizontal" ? "row" : "column";
+  container.style.flexDirection =
+    node.direction === "horizontal" ? "row" : "column";
   container.style.minWidth = "0";
   container.style.minHeight = "0";
   host.append(container);
@@ -1119,7 +1214,7 @@ async function renderNode(
     pane.style.minHeight = `${PANEL_MIN_HEIGHT_PX}px`;
     pane.style.display = "flex";
     container.append(pane);
-    await renderNode(child.node, pane, opts, getTree);
+    await renderNode(child.node, pane, opts, getTree, preserved);
 
     if (index < node.children.length - 1) {
       const sash = document.createElement("div");
@@ -1131,7 +1226,10 @@ async function renderNode(
   }
 }
 
-export async function renderSplitLayout(opts: SplitRenderOptions): Promise<void> {
+export async function renderSplitLayout(
+  opts: SplitRenderOptions,
+): Promise<void> {
+  const preservedPanels = detachPanelTiles(opts.desktop);
   opts.desktop.innerHTML = "";
   opts.desktop.className = "desktop-canvas desktop-split";
   if (opts.layoutEditing) opts.desktop.classList.add("canvas-editing");
@@ -1148,7 +1246,7 @@ export async function renderSplitLayout(opts: SplitRenderOptions): Promise<void>
   root.dataset.interactive = "true";
   opts.desktop.append(root);
 
-  await renderNode(opts.split.tree, root, renderOpts, getTree);
+  await renderNode(opts.split.tree, root, renderOpts, getTree, preservedPanels);
 }
 
 function tileLayoutFromSubGridDom(
@@ -1188,7 +1286,9 @@ export function syncSplitTreeFromDom(
     if (!slot) continue;
 
     if (leaf.subGrid?.enabled) {
-      const gridHost = slot.querySelector<HTMLElement>(":scope > .split-subgrid");
+      const gridHost = slot.querySelector<HTMLElement>(
+        ":scope > .split-subgrid",
+      );
       if (!gridHost) continue;
       const sub = leaf.subGrid;
       const ids: string[] = [];
@@ -1229,12 +1329,17 @@ export function syncSplitTreeFromDom(
   return next;
 }
 
-export function removePanelFromTree(tree: SplitNode, panelId: string): SplitNode {
+export function removePanelFromTree(
+  tree: SplitNode,
+  panelId: string,
+): SplitNode {
   const cloned = JSON.parse(JSON.stringify(tree)) as SplitNode;
   for (const leafNode of collectLeaves(cloned)) {
     if (leafNode.panelId === panelId) leafNode.panelId = null;
     if (leafNode.subGrid?.enabled) {
-      leafNode.subGrid.openPanelIds = leafNode.subGrid.openPanelIds.filter((id) => id !== panelId);
+      leafNode.subGrid.openPanelIds = leafNode.subGrid.openPanelIds.filter(
+        (id) => id !== panelId,
+      );
       delete leafNode.subGrid.panelLayouts[panelId];
     }
   }

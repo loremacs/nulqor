@@ -643,9 +643,21 @@ export function movePanelToLeaf(
   panelId: string,
   targetLeafId: string,
   panelLayouts?: Record<string, TileLayout>,
+  /** DOM slot id from drag — overrides tree ownership when they disagree after profile load. */
+  sourceLeafId?: string | null,
 ): SplitNode {
   const cloned = cloneSplitNode(tree);
-  const source = findLeafOwningPanel(cloned, panelId);
+  const owner = findLeafOwningPanel(cloned, panelId);
+  let source = owner;
+  if (sourceLeafId) {
+    const domLeaf = findLeaf(cloned, sourceLeafId);
+    if (domLeaf) {
+      if (owner && owner.id !== domLeaf.id) {
+        clearPanelFromLeaf(owner, panelId);
+      }
+      source = domLeaf;
+    }
+  }
   const target = findLeaf(cloned, targetLeafId);
   if (!target || !source || source.id === target.id) return cloned;
 

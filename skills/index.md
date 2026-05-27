@@ -21,6 +21,7 @@ index in the system prompt and load full bodies via `load_skill(name)`.
 | `create-extension` | Scaffold `extensions/<id>/` with colocated manifest, Rust, and optional UI |
 | `create-skill` | Scaffold `skills/<name>/` with SKILL.md frontmatter, Metadata block, and index row |
 | `edit-and-verify` | Edit code safely — read first, run tsc/cargo/audits, report results |
+| `canvas-layout` | Host grid/split/sub-grid layout UI — invariants, file map, test checklist |
 | `nulqor-communicate` | Talk to running app: HTTP API, MCP, observer protocol (`scripts/chat.ps1`) |
 
 ## Adding a Skill

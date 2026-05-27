@@ -23,7 +23,9 @@ Each main content area has an `index.md` that lists what lives there. **Read the
 | File | Purpose |
 |---|---|
 | [`TASKS.md`](TASKS.md) | Active task queue and definition of done |
+| [`BACKLOG.md`](BACKLOG.md) | Ideas for later — not yet scheduled in `TASKS.md` |
 | [`README.md`](README.md) | Build commands, prerequisites, repo map |
+| [`skills/canvas-layout/SKILL.md`](skills/canvas-layout/SKILL.md) | Host grid/split layout — read before editing canvas UI |
 | [`nulqor.toml`](nulqor.toml) | Startup: `open_panels`, `enabled_extensions`, `[shell]` grid options |
 
 ### How agents load context

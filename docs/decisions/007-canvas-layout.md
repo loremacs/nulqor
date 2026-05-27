@@ -51,3 +51,4 @@ PersistedShellState {
 
 - Panel extensions unchanged; host owns all layout chrome.
 - Future layout APIs (e.g. `canvas:layout-saved@1` event) can be added as host commands without core growth until explicitly approved.
+- Agent workflow for layout edits: [`skills/canvas-layout/SKILL.md`](../../skills/canvas-layout/SKILL.md).

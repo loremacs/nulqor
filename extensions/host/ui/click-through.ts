@@ -14,7 +14,9 @@ export type ClickThroughHandle = {
 };
 
 function isOverInteractive(clientX: number, clientY: number): boolean {
-  for (const el of document.querySelectorAll<HTMLElement>(INTERACTIVE_SELECTOR)) {
+  for (const el of document.querySelectorAll<HTMLElement>(
+    INTERACTIVE_SELECTOR,
+  )) {
     if (el.hidden) continue;
     const rect = el.getBoundingClientRect();
     if (
@@ -33,7 +35,10 @@ async function cursorClientCss(): Promise<{ x: number; y: number } | null> {
   const win = getCurrentWindow();
   try {
     const scale = await win.scaleFactor();
-    const [cursor, inner] = await Promise.all([cursorPosition(), win.innerPosition()]);
+    const [cursor, inner] = await Promise.all([
+      cursorPosition(),
+      win.innerPosition(),
+    ]);
     return {
       x: (cursor.x - inner.x) / scale,
       y: (cursor.y - inner.y) / scale,
@@ -123,7 +128,12 @@ export function mountClickThrough(initialEnabled: boolean): ClickThroughHandle {
     const inner = await win.innerSize();
     const scale = await win.scaleFactor();
     const logical = inner.toLogical(scale);
-    if (pos.x < 0 || pos.y < 0 || pos.x > logical.width || pos.y > logical.height) {
+    if (
+      pos.x < 0 ||
+      pos.y < 0 ||
+      pos.x > logical.width ||
+      pos.y > logical.height
+    ) {
       await setIgnoring(true);
       return;
     }
@@ -175,22 +185,24 @@ export function mountClickThrough(initialEnabled: boolean): ClickThroughHandle {
     void win.setIgnoreCursorEvents(false).catch(() => {});
   };
 
-  void win.onFocusChanged(({ payload: focused }) => {
-    if (disposed || !enabled) return;
-    pollFailures = 0;
-    if (focused) {
+  void win
+    .onFocusChanged(({ payload: focused }) => {
+      if (disposed || !enabled) return;
+      pollFailures = 0;
+      if (focused) {
+        void setIgnoring(false);
+        startPoll();
+        void updateFromPoll();
+        return;
+      }
+      // Release passthrough while unfocused — avoids WebView2 ghosting stale menu
+      // chrome at old dock positions when clicking through to another app.
+      stopPoll();
       void setIgnoring(false);
-      startPoll();
-      void updateFromPoll();
-      return;
-    }
-    // Release passthrough while unfocused — avoids WebView2 ghosting stale menu
-    // chrome at old dock positions when clicking through to another app.
-    stopPoll();
-    void setIgnoring(false);
-  }).then((unlisten) => {
-    focusUnlisten = unlisten;
-  });
+    })
+    .then((unlisten) => {
+      focusUnlisten = unlisten;
+    });
 
   if (enabled) {
     void win.setIgnoreCursorEvents(false).then(() => {

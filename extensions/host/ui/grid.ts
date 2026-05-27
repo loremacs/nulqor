@@ -30,6 +30,8 @@ export function updateGridGeometry(
   shellRoot: HTMLElement,
   desktop: HTMLElement,
   shell: ShellConfig,
+  /** Where grid CSS vars are written (defaults to shell root; sub-grids pass their host). */
+  cssScope: HTMLElement = shellRoot,
 ): GridMetrics {
   const rect = desktop.getBoundingClientRect();
   const cellSize = cellPixels(shell);
@@ -39,10 +41,10 @@ export function updateGridGeometry(
   const cols = deskColumns(desktopW, step);
   const rows = deskRows(desktopH, step);
 
-  shellRoot.style.setProperty("--grid-cols", String(cols));
-  shellRoot.style.setProperty("--grid-rows", String(rows));
-  shellRoot.style.setProperty("--grid-gap", `${GAP}px`);
-  shellRoot.style.setProperty("--cell-size", `${cellSize}px`);
+  cssScope.style.setProperty("--grid-cols", String(cols));
+  cssScope.style.setProperty("--grid-rows", String(rows));
+  cssScope.style.setProperty("--grid-gap", `${GAP}px`);
+  cssScope.style.setProperty("--cell-size", `${cellSize}px`);
 
   return {
     cols,
@@ -59,7 +61,10 @@ export function updateGridGeometry(
 
 export function applyMenuLayout(shellRoot: HTMLElement, dock: MenuDock): void {
   shellRoot.dataset.menuDock = dock;
-  shellRoot.style.setProperty("--menu-bar-thickness", `${MENU_BAR_THICKNESS_PX}px`);
+  shellRoot.style.setProperty(
+    "--menu-bar-thickness",
+    `${MENU_BAR_THICKNESS_PX}px`,
+  );
 }
 
 export function pointerToGridCell(
@@ -69,8 +74,14 @@ export function pointerToGridCell(
   metrics: GridMetrics,
 ): { col: number; row: number } {
   const rect = desktop.getBoundingClientRect();
-  const x = Math.max(0, Math.min(metrics.desktopW - 0.001, clientX - rect.left - metrics.originX));
-  const y = Math.max(0, Math.min(metrics.desktopH - 0.001, clientY - rect.top - metrics.originY));
+  const x = Math.max(
+    0,
+    Math.min(metrics.desktopW - 0.001, clientX - rect.left - metrics.originX),
+  );
+  const y = Math.max(
+    0,
+    Math.min(metrics.desktopH - 0.001, clientY - rect.top - metrics.originY),
+  );
   const col = Math.min(metrics.cols, Math.floor(x / metrics.step) + 1);
   const row = Math.min(metrics.rows, Math.floor(y / metrics.step) + 1);
   return { col: Math.max(1, col), row: Math.max(1, row) };
@@ -121,7 +132,10 @@ export function menuBarThicknessPx(_dock: MenuDock): number {
 }
 
 /** Nearest dock edge when pointer is within the snap zone; otherwise null. */
-export function menuDockSnapTarget(clientX: number, clientY: number): MenuDock | null {
+export function menuDockSnapTarget(
+  clientX: number,
+  clientY: number,
+): MenuDock | null {
   const h = window.innerHeight;
   const w = window.innerWidth;
   const zone = MENU_DOCK_SNAP_ZONE_PX;
@@ -142,7 +156,10 @@ export function minTileRowSpan(metrics: GridMetrics): number {
   return Math.max(1, Math.ceil(PANEL_MIN_HEIGHT_PX / metrics.step));
 }
 
-export function clampTileToDesk(tile: TileLayout, metrics: GridMetrics): TileLayout {
+export function clampTileToDesk(
+  tile: TileLayout,
+  metrics: GridMetrics,
+): TileLayout {
   const minCols = minTileColSpan(metrics);
   const minRows = minTileRowSpan(metrics);
   const colSpan = Math.min(Math.max(minCols, tile.colSpan), metrics.cols);
@@ -225,10 +242,25 @@ export function snapTileFromPointer(
 ): TileLayout {
   const cell = pointerToGridCell(topLeftX, topLeftY, desktop, metrics);
   const base = tile.pixelLock ?? tileSnapRect(tile, metrics);
-  const colSpan = Math.max(1, Math.min(metrics.cols, Math.round(base.width / metrics.step)));
-  const rowSpan = Math.max(1, Math.min(metrics.rows, Math.round(base.height / metrics.step)));
+  const colSpan = Math.max(
+    1,
+    Math.min(metrics.cols, Math.round(base.width / metrics.step)),
+  );
+  const rowSpan = Math.max(
+    1,
+    Math.min(metrics.rows, Math.round(base.height / metrics.step)),
+  );
   return clampTileToDesk(
-    { ...tile, col: cell.col, row: cell.row, colSpan, rowSpan, pixelLock: undefined, freeX: undefined, freeY: undefined },
+    {
+      ...tile,
+      col: cell.col,
+      row: cell.row,
+      colSpan,
+      rowSpan,
+      pixelLock: undefined,
+      freeX: undefined,
+      freeY: undefined,
+    },
     metrics,
   );
 }
@@ -239,12 +271,24 @@ export function tileLayoutFromPixelRect(
   metrics: GridMetrics,
   id: string,
 ): TileLayout {
-  const colSpan = Math.max(1, Math.min(metrics.cols, Math.round(rect.width / metrics.step)));
-  const rowSpan = Math.max(1, Math.min(metrics.rows, Math.round(rect.height / metrics.step)));
+  const colSpan = Math.max(
+    1,
+    Math.min(metrics.cols, Math.round(rect.width / metrics.step)),
+  );
+  const rowSpan = Math.max(
+    1,
+    Math.min(metrics.rows, Math.round(rect.height / metrics.step)),
+  );
   const maxCol = Math.max(1, metrics.cols - colSpan + 1);
   const maxRow = Math.max(1, metrics.rows - rowSpan + 1);
-  const col = Math.min(maxCol, Math.max(1, Math.floor(rect.left / metrics.step) + 1));
-  const row = Math.min(maxRow, Math.max(1, Math.floor(rect.top / metrics.step) + 1));
+  const col = Math.min(
+    maxCol,
+    Math.max(1, Math.floor(rect.left / metrics.step) + 1),
+  );
+  const row = Math.min(
+    maxRow,
+    Math.max(1, Math.floor(rect.top / metrics.step) + 1),
+  );
   return { id, col, row, colSpan, rowSpan };
 }
 
@@ -293,8 +337,14 @@ export function tileFromWindowRect(
     );
   }
 
-  const colSpan = Math.max(1, Math.min(metrics.cols, Math.round(local.width / metrics.step)));
-  const rowSpan = Math.max(1, Math.min(metrics.rows, Math.round(local.height / metrics.step)));
+  const colSpan = Math.max(
+    1,
+    Math.min(metrics.cols, Math.round(local.width / metrics.step)),
+  );
+  const rowSpan = Math.max(
+    1,
+    Math.min(metrics.rows, Math.round(local.height / metrics.step)),
+  );
   return clampTileToDesk(
     {
       ...tile,

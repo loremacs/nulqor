@@ -18,7 +18,10 @@ export const PANEL_REGISTRY: Record<string, PanelEntry> = {
   },
 };
 
-export async function mountPanel(id: string, container: HTMLElement): Promise<boolean> {
+export async function mountPanel(
+  id: string,
+  container: HTMLElement,
+): Promise<boolean> {
   const entry = PANEL_REGISTRY[id];
   if (!entry) {
     container.textContent = `Panel "${id}" has no UI loader yet.`;
