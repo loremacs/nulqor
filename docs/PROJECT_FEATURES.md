@@ -170,9 +170,23 @@ Canonical record of every shipped feature. Each entry provides enough implementa
 
 ### 2.4 Chat UI panel (`extensions/chat-panel/`)
 
-**Files:** `extension.toml`, `src/lib.rs`, `ui/main.ts`, `ui/style.css`. Root `index.html` loads the panel UI.
-**Purpose:** Dominant transcript view + input box + connection bar. Streams reply tokens live. Collapsible system prompt and reasoning blocks. Fixed harness token cost per turn. Participant labels per decisions/006 §4.
-**Key behaviour:** Calls `context-editor:system-prompt@1` before each generation. Model dropdown populated from `/v1/models`. Connects via `provider:connect@1`.
+**Files:** `extension.toml`, `src/lib.rs`, `ui/panel.ts`, `ui/style.css`. Registered in `extensions/host/ui/panels.ts` as a canvas tile.
+**Purpose:** Active-branch chat + human-only conversation map (rail) + archived fork overlay. Session picker, LM Studio connection bar, reasoning blocks, harness token budget.
+**Key behaviour:**
+- Main pane: `transcript:get@1` (active branch only — no fork UI inline).
+- Left rail: `human-rail:list@1` — click row to jump (`message_id` scroll); fork rows open `human-branch:open@1` overlay.
+- Sessions: `sessions:list@1`, `sessions:create@1`, `sessions:load@1`.
+- Edit user message: `sessions:edit-message@1` — archives prior branch to `.nulqor/human/branches/` when replies exist; optional regenerate.
+- Bookmarks: `human-rail:add-marker@1` via Mark dropdown or Shift+click message.
+- Requires `session-store`, `transcript`, `provider-lmstudio`, `http-api`.
+
+### 2.4b Session store (`extensions/session-store/`)
+
+**Files:** `extension.toml`, `src/lib.rs`, `README.md`
+**Purpose:** File-backed sessions with agent/human path split. Agent contract: `.nulqor/sessions/<id>.jsonl` only. Human-only: `.nulqor/human/` (catalog, rails, branches).
+**Commands:** `sessions:list@1`, `sessions:create@1`, `sessions:load@1`, `sessions:active@1`, `sessions:edit-message@1`, `human-rail:list@1`, `human-rail:add-marker@1`, `human-branch:list@1`, `human-branch:open@1`.
+**Events subscribed:** `transcript:message-added@1` (append + auto rail marker), `transcript:hydrated@1` (rewrite session file).
+**Transcript integration:** `transcript:hydrate@1` (service-only) replaces in-memory messages on load/edit/session switch.
 
 ### 2.5 Context editor extension (`extensions/context-editor/`)
 

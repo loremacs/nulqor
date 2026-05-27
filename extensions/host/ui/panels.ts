@@ -16,6 +16,10 @@ export const PANEL_REGISTRY: Record<string, PanelEntry> = {
     load: () => import("../../clock-panel/ui/panel.ts"),
     resizable: true,
   },
+  "chat-panel": {
+    load: () => import("../../chat-panel/ui/panel.ts"),
+    resizable: true,
+  },
 };
 
 export async function mountPanel(

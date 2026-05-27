@@ -32,6 +32,8 @@ export type WindowChromeContext = {
   onMenuDockDragMove?: (event: PointerEvent) => void;
   /** Fullscreen or windowed: drag gesture ended (hide snap preview). */
   onMenuDockDragEnd?: () => void;
+  /** Fired when display mode changes (fullscreen overlay vs normal window). */
+  onWindowModeChanged?: (mode: WindowMode, previous: WindowMode) => void;
   initialMode: WindowMode;
 };
 

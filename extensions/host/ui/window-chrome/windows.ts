@@ -92,13 +92,17 @@ function mount(ctx: WindowChromeContext): WindowChromeHandle {
     onMenuDockDrag,
     onMenuDockDragMove,
     onMenuDockDragEnd,
+    onWindowModeChanged,
   } = ctx;
   let windowMode = ctx.initialMode;
   let togglingFullscreen = false;
 
   const setWindowMode = (mode: WindowMode): void => {
+    if (mode === windowMode) return;
+    const previous = windowMode;
     windowMode = mode;
     shellRoot.dataset.windowMode = mode;
+    onWindowModeChanged?.(mode, previous);
   };
 
   const syncUi = async (): Promise<void> => {

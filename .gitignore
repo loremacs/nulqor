@@ -29,3 +29,6 @@ Thumbs.db
 
 # Runtime run logs (run-logger extension output)
 runs/*.jsonl
+
+# Local session store (session-store extension — agent + human data)
+.nulqor/

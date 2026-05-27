@@ -15,6 +15,7 @@ Each extension is self-contained under `extensions/<id>/`. Rust sources compile 
 | `hello-world` | Panel | Phase 1 | Minimal "Hello World" window — startup profile demo |
 | `provider-lmstudio` | Service | Phase 2 | LM Studio connection, model list, single-flight generation |
 | `transcript` | Service | Phase 2 | Shared in-memory session; emits `transcript:message-added@1` |
+| `session-store` | Service | Phase 4 prep | File sessions (`.nulqor/sessions/`), human rail + archived forks |
 | `http-api` | Service | Phase 2 | HTTP/WebSocket API + observer/catch-up protocol |
 | `chat-panel` | Panel | Phase 2 | Dominant chat UI with streaming, reasoning, token stats |
 | `context-editor` | Service | Phase 2 | Loads skills/agents/rules, assembles system prompt, hot-reloads |

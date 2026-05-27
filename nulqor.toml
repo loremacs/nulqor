@@ -1,12 +1,19 @@
 # Nulqor startup — shell loads host desk; panels open as tiles on the grid.
 # Restart after changing enabled_extensions. Panel open/close is live in the Apps menu.
 
-open_panels = ["hello-world", "clock-panel"]
+open_panels = ["hello-world", "clock-panel", "chat-panel"]
 
 enabled_extensions = [
   "host",
   "hello-world",
   "clock-panel",
+  "provider-lmstudio",
+  "transcript",
+  "session-store",
+  "http-api",
+  "chat-panel",
+  "context-editor",
+  "run-logger",
 ]
 
 [shell]
@@ -16,18 +23,5 @@ show_grid = true
 click_through = true
 always_on_top = false
 
-# Full AI harness (swap enabled_extensions; add panels via Apps menu or open_panels):
-# open_panels = ["chat-panel"]
-# enabled_extensions = [
-#   "host",
-#   "hello-panel",
-#   "provider-lmstudio",
-#   "transcript",
-#   "http-api",
-#   "chat-panel",
-#   "context-editor",
-#   "mcp-bridge",
-#   "skill-runner",
-#   "validation",
-#   "run-logger",
-# ]
+# Full harness (MCP, skills, validation):
+# enabled_extensions += ["hello-panel", "mcp-bridge", "skill-runner", "validation"]

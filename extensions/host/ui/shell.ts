@@ -65,6 +65,7 @@ import {
 } from "./types";
 import { captureWindowFrame, DEFAULT_WINDOWED_FRAME } from "./window-frame";
 import { mountWindowChrome } from "./window-chrome";
+import type { WindowMode } from "./window-chrome";
 
 const DEFAULT_TILE_COLS = 4;
 const DEFAULT_TILE_ROWS = 3;
@@ -72,6 +73,9 @@ const DEFAULT_TILE_ROWS = 3;
 type ShellToggleKey = "click_through" | "always_on_top";
 
 const SHELL_TOGGLE_KEYS: ShellToggleKey[] = ["click_through", "always_on_top"];
+
+/** Solid desk fill when not in fullscreen overlay mode. */
+const WINDOWED_SHELL_BG = "#121216";
 
 type LayoutToggleKey = "snap_enabled" | "show_grid" | "sash_snap_enabled";
 
@@ -272,6 +276,15 @@ function syncMenuCheckRow(row: HTMLElement, checked: boolean): void {
   if (check) check.textContent = checked ? "✓" : "";
 }
 
+function setWindowModePresentation(mode: WindowMode): void {
+  document.documentElement.dataset.nulqorWindowMode = mode;
+  const bg = mode === "windowed" ? WINDOWED_SHELL_BG : "transparent";
+  document.documentElement.style.backgroundColor = bg;
+  document.body.style.backgroundColor = bg;
+  const app = document.getElementById("app");
+  if (app) app.style.backgroundColor = bg;
+}
+
 function clampTile(tile: TileLayout, metrics: GridMetrics): TileLayout {
   return clampTileToDesk(tile, metrics);
 }
@@ -389,7 +402,7 @@ export async function initShell(): Promise<void> {
             <div class="menu-dropdown" data-panel="settings" hidden role="menu">
               <button type="button" class="menu-dropdown-row menu-dropdown-row-check" data-setting="click_through" role="menuitemcheckbox" aria-checked="false">
                 <span class="menu-dropdown-gutter menu-dropdown-check" aria-hidden="true"></span>
-                <span class="menu-dropdown-text">Click Through Desktop</span>
+                <span class="menu-dropdown-text">Click Through Desktop <span class="menu-dropdown-hint">(fullscreen only)</span></span>
               </button>
               <button type="button" class="menu-dropdown-row menu-dropdown-row-check" data-setting="always_on_top" role="menuitemcheckbox" aria-checked="false">
                 <span class="menu-dropdown-gutter menu-dropdown-check" aria-hidden="true"></span>
@@ -426,6 +439,8 @@ export async function initShell(): Promise<void> {
   const shellRoot = app.querySelector<HTMLElement>(".nulqor-shell")!;
   const menuBar = app.querySelector<HTMLElement>(".menu-bar")!;
   const desktop = app.querySelector<HTMLElement>(".desktop-canvas")!;
+  shellRoot.dataset.windowMode = windowMode;
+  setWindowModePresentation(windowMode);
   const settingsPanel = app.querySelector<HTMLElement>(
     '[data-panel="settings"]',
   )!;
@@ -452,8 +467,72 @@ export async function initShell(): Promise<void> {
   applyShellCss(shellRoot, shell);
   setMenuDock(menuDock);
 
-  const clickThrough = mountClickThrough(shell.click_through);
+  const clickThrough = mountClickThrough(false);
   const menuDockPreview = mountMenuDockPreview(shellRoot);
+  let toastHideTimer: ReturnType<typeof setTimeout> | null = null;
+
+  type ShellToastOptions = {
+    durationMs?: number;
+    tone?: "default" | "alert";
+    placement?: "bottom" | "top";
+  };
+
+  const showShellToast = (
+    message: string,
+    options: ShellToastOptions = {},
+  ): void => {
+    const { durationMs = 3200, tone = "default", placement = "bottom" } = options;
+    let toast = document.body.querySelector<HTMLElement>(".shell-toast");
+    if (!toast) {
+      toast = document.createElement("div");
+      toast.className = "shell-toast";
+      toast.setAttribute("role", tone === "alert" ? "alert" : "status");
+      document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.className = "shell-toast";
+    if (tone === "alert") toast.classList.add("shell-toast-alert");
+    if (placement === "top") toast.classList.add("shell-toast-top");
+    toast.classList.add("shell-toast-visible");
+    if (toastHideTimer !== null) clearTimeout(toastHideTimer);
+    toastHideTimer = window.setTimeout(() => {
+      toast?.classList.remove("shell-toast-visible");
+      toastHideTimer = null;
+    }, durationMs);
+  };
+
+  const effectiveClickThrough = (): boolean =>
+    windowMode === "fullscreen" && shell.click_through;
+
+  const applyWindowModePolicy = (
+    mode: WindowMode,
+    previous: WindowMode,
+  ): void => {
+    windowMode = mode;
+    setWindowModePresentation(mode);
+
+    if (mode === "windowed") {
+      clickThrough.setEnabled(false);
+      clickThrough.forceClickable();
+      if (
+        previous !== mode &&
+        previous === "fullscreen" &&
+        shell.click_through
+      ) {
+        showShellToast("Windowed mode — click-through disabled.", {
+          tone: "alert",
+          placement: "top",
+          durationMs: 4000,
+        });
+      }
+    } else {
+      clickThrough.setEnabled(shell.click_through);
+    }
+
+    syncSettingsInputs();
+    syncClickThrough();
+  };
+
   const syncClickThrough = (): void => {
     clickThrough.refresh();
   };
@@ -652,7 +731,6 @@ export async function initShell(): Promise<void> {
 
   const refreshWindowFrame = async (): Promise<void> => {
     windowFrame = await captureWindowFrame();
-    windowMode = windowFrame.mode;
     persist();
   };
 
@@ -1042,15 +1120,29 @@ export async function initShell(): Promise<void> {
       const row = settingsPanel.querySelector<HTMLElement>(
         `[data-setting="${key}"]`,
       )!;
-      syncMenuCheckRow(row, shell[key]);
+      if (key === "click_through") {
+        const disabled = windowMode === "windowed";
+        row.classList.toggle("menu-dropdown-row-disabled", disabled);
+        row.setAttribute("aria-disabled", String(disabled));
+        syncMenuCheckRow(row, effectiveClickThrough());
+      } else {
+        syncMenuCheckRow(row, shell[key]);
+      }
     }
   };
 
   const applyWindowPref = (key: "click_through" | "always_on_top"): void => {
+    if (key === "click_through" && windowMode === "windowed") {
+      showShellToast("Click-through is only available in fullscreen.", {
+        tone: "alert",
+        placement: "top",
+      });
+      return;
+    }
     shell[key] = !shell[key];
     syncSettingsInputs();
     if (key === "click_through") {
-      clickThrough.setEnabled(shell.click_through);
+      clickThrough.setEnabled(effectiveClickThrough());
       syncClickThrough();
     } else {
       void applyAlwaysOnTop(shell.always_on_top);
@@ -1208,6 +1300,14 @@ export async function initShell(): Promise<void> {
     );
     if (!row?.dataset.setting) return;
     const key = row.dataset.setting;
+    if (key === "click_through" && row.getAttribute("aria-disabled") === "true") {
+      showShellToast("Click-through is only available in fullscreen.", {
+        tone: "alert",
+        placement: "top",
+      });
+      return;
+    }
+    if (row.getAttribute("aria-disabled") === "true") return;
     if (key === "click_through" || key === "always_on_top") {
       applyWindowPref(key);
     }
@@ -1292,7 +1392,7 @@ export async function initShell(): Promise<void> {
     '[data-action="restore"]',
   )!;
 
-  mountWindowChrome({
+  const windowChrome = mountWindowChrome({
     menuBar,
     shellRoot,
     restoreBtn,
@@ -1305,6 +1405,10 @@ export async function initShell(): Promise<void> {
       }
       void renderCanvas();
       syncClickThrough();
+    },
+    onWindowModeChanged: (mode, previous) => {
+      applyWindowModePolicy(mode, previous);
+      persist();
     },
     onMenuDockDrag: (endEvent) => {
       menuDockPreview.hide();
@@ -1319,6 +1423,10 @@ export async function initShell(): Promise<void> {
       menuDockPreview.hide();
     },
     initialMode: windowMode,
+  });
+
+  void windowChrome.syncUi().then(() => {
+    applyWindowModePolicy(windowChrome.getWindowMode(), windowChrome.getWindowMode());
   });
 
   menuBar.addEventListener("pointerdown", (event) => {

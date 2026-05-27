@@ -41,7 +41,7 @@ use context::{AppState, CoreContext, InMemoryConfigStore};
 use events::EventBus;
 use extensions::{
     chat_panel, clock_panel, context_editor, hello_panel, hello_world, host, http_api,
-    mcp_bridge, provider_lmstudio, run_logger, skill_runner, transcript, validation,
+    mcp_bridge, provider_lmstudio, run_logger, session_store, skill_runner, transcript, validation,
 };
 use startup_config::load_startup_config;
 use permission::PermissionGate;
@@ -96,6 +96,7 @@ fn load_extensions(extensions_dir: &std::path::Path, ctx: &CoreContext) {
         Arc::new(provider_lmstudio::LmStudioProvider::new(m))
     });
     loader.register("transcript", |m| Arc::new(transcript::TranscriptExtension::new(m)));
+    loader.register("session-store", |m| Arc::new(session_store::SessionStoreExtension::new(m)));
     loader.register("http-api", |m| Arc::new(http_api::HttpApiExtension::new(m)));
     loader.register("chat-panel", |m| Arc::new(chat_panel::ChatPanelExtension::new(m)));
     loader.register("context-editor", |m| {

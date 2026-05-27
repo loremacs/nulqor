@@ -11,7 +11,7 @@ export type ShellConfig = {
   show_grid: boolean;
   /** Snap split-pane sashes to align with other dividers in layout mode. */
   sash_snap_enabled: boolean;
-  /** Pass clicks on empty canvas areas to the OS desktop (fullscreen overlay mode). */
+  /** Pass clicks on empty canvas to the desktop — fullscreen overlay only; off in windowed mode. */
   click_through: boolean;
   /** Keep the Nulqor window above other applications. */
   always_on_top: boolean;

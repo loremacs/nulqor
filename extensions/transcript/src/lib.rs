@@ -102,6 +102,7 @@ impl Extension for TranscriptExtension {
         let bus = ctx.bus.clone();
 
         register_get(session.clone(), &ctx.commands)?;
+        register_hydrate(session.clone(), bus.clone(), &ctx.commands)?;
         register_add_user_message(session.clone(), bus.clone(), &ctx.commands)?;
         register_clear(session.clone(), bus.clone(), &ctx.commands)?;
         register_set_active_agent(session.clone(), &ctx.commands)?;
@@ -129,6 +130,55 @@ fn register_get(
             permission: Permission::Read,
         },
         Arc::new(move |_| Ok(session.read().unwrap().to_json())),
+    )
+}
+
+fn register_hydrate(
+    session: SharedSession,
+    bus: Arc<EventBus>,
+    cmds: &Arc<crate::commands::CommandRegistry>,
+) -> Result<(), CoreError> {
+    cmds.register(
+        CommandDecl {
+            id: CommandId {
+                namespace: "transcript".into(),
+                action: "hydrate".into(),
+                version: 1,
+            },
+            owner: "transcript".into(),
+            input_schema: r#"{ "messages": "array" }"#.into(),
+            output_schema: r#"{ "messages": "array", "transcript_hash": "string" }"#.into(),
+            callable_by: vec!["service".into()],
+            permission: Permission::Write,
+        },
+        Arc::new(move |input| {
+            let raw = input["messages"]
+                .as_array()
+                .ok_or_else(|| CoreError::Io("hydrate: messages array required".into()))?;
+
+            let messages: Vec<Message> = raw
+                .iter()
+                .map(|v| serde_json::from_value(v.clone()))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| CoreError::Io(format!("hydrate: bad message: {e}")))?;
+
+            {
+                let mut s = session.write().unwrap();
+                s.messages = messages;
+            }
+
+            let snapshot = session.read().unwrap().to_json();
+            let _ = bus.publish(NamespacedEvent {
+                id: EventId {
+                    namespace: "transcript".into(),
+                    name: "hydrated".into(),
+                    version: 1,
+                },
+                payload: snapshot.clone(),
+            });
+
+            Ok(snapshot)
+        }),
     )
 }
 
@@ -367,6 +417,7 @@ mod tests {
 
         let cmds = ctx.commands.list_commands();
         assert!(cmds.iter().any(|c| c == "transcript:get@1"));
+        assert!(cmds.iter().any(|c| c == "transcript:hydrate@1"));
         assert!(cmds.iter().any(|c| c == "transcript:add-user-message@1"));
         assert!(cmds.iter().any(|c| c == "transcript:clear@1"));
         assert!(cmds.iter().any(|c| c == "transcript:set-active-agent@1"));

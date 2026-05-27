@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 
 const INTERACTIVE_SELECTOR =
-  ".menu-bar, .panel-tile, .menu-dropdown:not([hidden]), .shell-modal-backdrop, .split-sash, .split-slot-edit-bar, .split-slot-edit-bar button";
+  ".menu-bar, .menu-bar-menus, .menu-window-controls, .panel-tile, .menu-dropdown:not([hidden]), .shell-modal-backdrop, .split-sash, .split-slot-edit-bar, .split-slot-edit-bar button";
 const POLL_MS = 16;
 const HITBOX_PAD_PX = 2;
 
@@ -10,8 +10,15 @@ export type ClickThroughHandle = {
   refresh: () => void;
   suspend: () => () => void;
   setEnabled: (enabled: boolean) => void;
+  /** OS-level pass-through off — use when entering windowed mode. */
+  forceClickable: () => void;
   dispose: () => void;
 };
+
+function isWindowedMode(): boolean {
+  const shell = document.querySelector<HTMLElement>(".nulqor-shell");
+  return shell?.dataset.windowMode === "windowed";
+}
 
 function isOverInteractive(clientX: number, clientY: number): boolean {
   for (const el of document.querySelectorAll<HTMLElement>(
@@ -65,6 +72,7 @@ export function mountClickThrough(initialEnabled: boolean): ClickThroughHandle {
   let suspendCount = 0;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let pollFailures = 0;
+  let windowFocused = true;
 
   const setIgnoring = async (next: boolean): Promise<void> => {
     if (disposed || ignoring === next) return;
@@ -76,6 +84,13 @@ export function mountClickThrough(initialEnabled: boolean): ClickThroughHandle {
     }
   };
 
+  const ensureClickable = async (): Promise<void> => {
+    await setIgnoring(false);
+  };
+
+  const passThroughAllowed = (): boolean =>
+    enabled && !isWindowedMode() && suspendCount === 0;
+
   const stopPoll = (): void => {
     if (pollTimer !== null) {
       clearInterval(pollTimer);
@@ -84,7 +99,7 @@ export function mountClickThrough(initialEnabled: boolean): ClickThroughHandle {
   };
 
   const startPoll = (): void => {
-    if (pollTimer !== null || disposed || !enabled) return;
+    if (pollTimer !== null || disposed || !passThroughAllowed()) return;
     pollTimer = setInterval(() => {
       void updateFromPoll();
     }, POLL_MS);
@@ -93,32 +108,53 @@ export function mountClickThrough(initialEnabled: boolean): ClickThroughHandle {
   const disablePassThrough = async (): Promise<void> => {
     stopPoll();
     pollFailures = 0;
-    await setIgnoring(false);
+    await ensureClickable();
+  };
+
+  const isActiveForPassThrough = async (): Promise<boolean> => {
+    if (!passThroughAllowed()) return false;
+    let focused = windowFocused;
+    try {
+      focused = await win.isFocused();
+      windowFocused = focused;
+    } catch {
+      focused = windowFocused && document.hasFocus();
+    }
+    if (!focused) return false;
+    return document.hasFocus();
   };
 
   const apply = async (clientX: number, clientY: number): Promise<void> => {
-    if (disposed || !enabled) {
-      await disablePassThrough();
+    if (disposed || !passThroughAllowed()) {
+      await ensureClickable();
       return;
     }
 
-    if (suspendCount > 0 || !document.hasFocus()) {
-      await setIgnoring(false);
+    if (!(await isActiveForPassThrough())) {
+      await ensureClickable();
       return;
     }
 
     const interactive = isOverInteractive(clientX, clientY);
-    const shouldIgnore = !interactive;
-    await setIgnoring(shouldIgnore);
+    await setIgnoring(!interactive);
   };
 
   const updateFromPoll = async (): Promise<void> => {
+    if (disposed || !passThroughAllowed()) {
+      await ensureClickable();
+      return;
+    }
+
+    if (!(await isActiveForPassThrough())) {
+      await ensureClickable();
+      return;
+    }
+
     const pos = await cursorClientCss();
-    if (!pos || disposed) {
+    if (!pos) {
       pollFailures += 1;
-      // Fail open so the shell stays clickable if cursor polling breaks.
       if (pollFailures >= 2) {
-        await setIgnoring(false);
+        await ensureClickable();
       }
       return;
     }
@@ -146,30 +182,67 @@ export function mountClickThrough(initialEnabled: boolean): ClickThroughHandle {
     void apply(event.clientX, event.clientY);
   };
 
+  const onPointerDown = (): void => {
+    void ensureClickable();
+  };
+
   document.addEventListener("mousemove", onMouseMove, { passive: true });
+  document.addEventListener("pointerdown", onPointerDown, true);
 
   const refresh = (): void => {
+    if (!passThroughAllowed()) {
+      void ensureClickable();
+      return;
+    }
     void updateFromPoll();
   };
 
   const suspend = (): (() => void) => {
     suspendCount += 1;
-    void setIgnoring(false);
+    void ensureClickable();
     return () => {
       suspendCount = Math.max(0, suspendCount - 1);
-      if (suspendCount === 0) {
+      if (passThroughAllowed()) {
         void updateFromPoll();
+      } else {
+        void ensureClickable();
       }
     };
   };
 
   const setEnabled = (next: boolean): void => {
     enabled = next;
-    if (!enabled) {
+    if (!passThroughAllowed()) {
       void disablePassThrough();
       return;
     }
-    void win.setIgnoreCursorEvents(false).then(() => {
+    void ensureClickable().then(() => {
+      startPoll();
+      void updateFromPoll();
+    });
+  };
+
+  const forceClickable = (): void => {
+    stopPoll();
+    pollFailures = 0;
+    void ensureClickable();
+  };
+
+  const onWindowBlur = (): void => {
+    windowFocused = false;
+    pollFailures = 0;
+    stopPoll();
+    void ensureClickable();
+  };
+
+  const onWindowFocus = (): void => {
+    windowFocused = true;
+    pollFailures = 0;
+    if (!passThroughAllowed()) {
+      void ensureClickable();
+      return;
+    }
+    void ensureClickable().then(() => {
       startPoll();
       void updateFromPoll();
     });
@@ -182,34 +255,34 @@ export function mountClickThrough(initialEnabled: boolean): ClickThroughHandle {
     stopPoll();
     focusUnlisten?.();
     document.removeEventListener("mousemove", onMouseMove);
-    void win.setIgnoreCursorEvents(false).catch(() => {});
+    document.removeEventListener("pointerdown", onPointerDown, true);
+    void ensureClickable().catch(() => {});
   };
 
   void win
     .onFocusChanged(({ payload: focused }) => {
-      if (disposed || !enabled) return;
-      pollFailures = 0;
-      if (focused) {
-        void setIgnoring(false);
-        startPoll();
-        void updateFromPoll();
-        return;
-      }
-      // Release passthrough while unfocused — avoids WebView2 ghosting stale menu
-      // chrome at old dock positions when clicking through to another app.
-      stopPoll();
-      void setIgnoring(false);
+      if (focused) onWindowFocus();
+      else onWindowBlur();
     })
     .then((unlisten) => {
       focusUnlisten = unlisten;
     });
 
-  if (enabled) {
-    void win.setIgnoreCursorEvents(false).then(() => {
+  void win.isFocused().then((focused) => {
+    windowFocused = focused;
+    if (!focused || isWindowedMode()) {
+      void ensureClickable();
+    }
+  });
+
+  if (passThroughAllowed()) {
+    void ensureClickable().then(() => {
       startPoll();
       void updateFromPoll();
     });
+  } else {
+    void ensureClickable();
   }
 
-  return { refresh, suspend, setEnabled, dispose };
+  return { refresh, suspend, setEnabled, forceClickable, dispose };
 }

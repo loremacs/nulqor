@@ -1,0 +1,19 @@
+[extension]
+id             = "session-store"
+version        = "0.1.0"
+kind           = "Service"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+requires       = ["transcript"]
+fs-scopes      = [".nulqor/"]
+
+[[subscribes]]
+namespace = "transcript"
+name      = "message-added"
+version   = "1"
+
+[[subscribes]]
+namespace = "transcript"
+name      = "hydrated"
+version   = "1"

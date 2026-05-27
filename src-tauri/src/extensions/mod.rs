@@ -23,10 +23,10 @@ pub mod mcp_bridge;
 pub mod skill_runner;
 #[path = "../../../extensions/validation/src/lib.rs"]
 pub mod validation;
+#[path = "../../../extensions/session-store/src/lib.rs"]
+pub mod session_store;
 #[path = "../../../extensions/run-logger/src/lib.rs"]
 pub mod run_logger;
-
-
 
 #[path = "../../../extensions/clock-panel/src/lib.rs"]
 pub mod clock_panel;
