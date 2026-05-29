@@ -24,6 +24,7 @@ Each main content area has an `index.md` that lists what lives there. **Read the
 |---|---|
 | [`TASKS.md`](TASKS.md) | Active task queue and definition of done |
 | [`BACKLOG.md`](BACKLOG.md) | Ideas for later — not yet scheduled in `TASKS.md` |
+| [`docs/decisions/009-sessions-file-store.draft.md`](docs/decisions/009-sessions-file-store.draft.md) | **Chat / sessions / group chat handoff** — v1 shipped vs designed gaps |
 | [`README.md`](README.md) | Build commands, prerequisites, repo map |
 | [`skills/canvas-layout/SKILL.md`](skills/canvas-layout/SKILL.md) | Host grid/split layout — read before editing canvas UI |
 | [`nulqor.toml`](nulqor.toml) | Startup: `open_panels`, `enabled_extensions`, `[shell]` grid options |
@@ -118,4 +119,14 @@ Each main content area has an `index.md` that lists what lives there. **Read the
 - [`tools/index.md`](tools/index.md) — linter and dev utilities
 - [`archive/index.md`](archive/index.md) — superseded material
 - [`TASKS.md`](TASKS.md) — active task queue
+- [`BACKLOG.md`](BACKLOG.md) — ideas for later; **chat/session handoff pointer at top**
+- [`docs/decisions/009-sessions-file-store.draft.md`](docs/decisions/009-sessions-file-store.draft.md) — sessions file store, thread vs room, human rail, forks (read before chat/session work)
 - [`README.md`](README.md) — build commands and prerequisites
+
+### Topic routing
+
+| If the task touches… | Read first |
+|---|---|
+| Chat UI, sessions, persistence, group chat, human rail, forks | [`docs/decisions/009-sessions-file-store.draft.md`](docs/decisions/009-sessions-file-store.draft.md) → [`docs/PROJECT_FEATURES.md`](docs/PROJECT_FEATURES.md) §2.4–2.4b → [`BACKLOG.md`](BACKLOG.md) § Chat |
+| Host canvas, grid/split layout, click-through | [`skills/canvas-layout/SKILL.md`](skills/canvas-layout/SKILL.md) |
+| HTTP/MCP with a running app | [`skills/nulqor-communicate/SKILL.md`](skills/nulqor-communicate/SKILL.md) |

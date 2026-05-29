@@ -71,12 +71,60 @@ impl CommandRegistry {
         })?;
 
         self.gate.check(caller, entry.decl.permission, &key)?;
+
+        if !crate::workbench_prefs::is_protected_extension(&entry.decl.owner) {
+            let root = crate::workbench_prefs::resolve_workspace_root();
+            let prefs = crate::workbench_prefs::load(&root);
+            if !prefs.extension_enabled(&entry.decl.owner) {
+                return Err(CoreError::Io(format!(
+                    "extension '{}' is disabled in Workbench",
+                    entry.decl.owner
+                )));
+            }
+        }
+
         (entry.handler)(input)
     }
 
     /// List all registered command ids (for diagnostics / IPC introspection).
     pub fn list_commands(&self) -> Vec<String> {
         self.handlers.read().unwrap().keys().cloned().collect()
+    }
+
+    /// Full command catalog for the workbench registry service.
+    pub fn command_catalog(&self) -> Vec<serde_json::Value> {
+        let mut entries: Vec<_> = self
+            .handlers
+            .read()
+            .unwrap()
+            .values()
+            .map(|entry| {
+                let perm = match entry.decl.permission {
+                    crate::types::Permission::Read => "read",
+                    crate::types::Permission::Write => "write",
+                    crate::types::Permission::Destructive => "destructive",
+                    crate::types::Permission::System => "system",
+                };
+                serde_json::json!({
+                    "id": entry.decl.id.key(),
+                    "namespace": entry.decl.id.namespace,
+                    "action": entry.decl.id.action,
+                    "version": entry.decl.id.version,
+                    "owner": entry.decl.owner,
+                    "permission": perm,
+                    "input_schema": entry.decl.input_schema,
+                    "output_schema": entry.decl.output_schema,
+                    "callable_by": entry.decl.callable_by,
+                })
+            })
+            .collect();
+        entries.sort_by(|a, b| {
+            a["id"]
+                .as_str()
+                .unwrap_or("")
+                .cmp(b["id"].as_str().unwrap_or(""))
+        });
+        entries
     }
 }
 

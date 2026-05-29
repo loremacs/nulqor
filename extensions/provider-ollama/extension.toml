@@ -1,0 +1,80 @@
+[extension]
+id             = "provider-ollama"
+version        = "0.1.0"
+kind           = "Provider"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+http-hosts     = ["localhost"]
+
+[[provides]]
+capability = "provider"
+instance   = "ollama"
+contract   = "provider@1"
+
+[[commands]]
+id           = "ollama:connect@1"
+owner        = "provider-ollama"
+permission   = "read"
+input-schema  = '{ "url": "string", "model": "string" }'
+output-schema = '{ "ok": "boolean", "connected": "boolean", "active": "string", "nulqor_loaded": "boolean" }'
+
+[[commands]]
+id           = "ollama:disconnect@1"
+owner        = "provider-ollama"
+permission   = "read"
+output-schema = '{ "ok": "boolean" }'
+
+[[commands]]
+id           = "ollama:select-model@1"
+owner        = "provider-ollama"
+permission   = "read"
+input-schema  = '{ "model": "string" }'
+output-schema = '{ "ok": "boolean", "active": "string", "nulqor_loaded": "boolean" }'
+
+[[commands]]
+id           = "ollama:stop-model@1"
+owner        = "provider-ollama"
+permission   = "read"
+output-schema = '{ "ok": "boolean", "stopped": "boolean", "active": "string|null" }'
+
+[[commands]]
+id           = "ollama:unload-model@1"
+owner        = "provider-ollama"
+permission   = "read"
+input-schema  = '{ "model": "string" }'
+output-schema = '{ "ok": "boolean", "stopped": "boolean" }'
+
+[[commands]]
+id           = "ollama:loaded-models@1"
+owner        = "provider-ollama"
+permission   = "read"
+input-schema  = '{ "refresh": "boolean?", "url": "string?" }'
+output-schema = '{ "loaded": "array" }'
+
+[[commands]]
+id           = "ollama:models@1"
+owner        = "provider-ollama"
+permission   = "read"
+input-schema  = '{ "refresh": "boolean?", "url": "string?" }'
+output-schema = '{ "models": "array", "active": "string|null", "connected": "boolean", "nulqor_loaded_active": "boolean" }'
+
+[[commands]]
+id           = "ollama:generate@1"
+owner        = "provider-ollama"
+permission   = "write"
+callable-by  = ["panel", "agent", "service"]
+input-schema  = '{ "messages": "array", "model": "string?", "agent": "string?", "system_prompt": "string?", "temperature": "number?", "max_tokens": "number?" }'
+output-schema = '{ "stream_id": "string" }'
+
+[[publishes]]
+id = "provider:stream-start@1"
+
+[[publishes]]
+id = "provider:stream-delta@1"
+
+[[publishes]]
+id = "provider:stream-done@1"
+
+[[publishes]]
+id = "provider:stream-error@1"

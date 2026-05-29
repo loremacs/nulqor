@@ -5,7 +5,7 @@ kind           = "Panel"
 api-version    = "v1"
 schema-version = "1.0.0"
 min-core       = "0.1.0"
-requires       = ["transcript", "provider-lmstudio", "http-api", "session-store"]
+requires       = ["transcript", "provider-router", "http-api", "session-store", "context-editor"]
 
 [[subscribes]]
 namespace = "transcript"

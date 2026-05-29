@@ -31,6 +31,18 @@ export type CanvasConfig = {
 
 export type MenuDock = "top" | "bottom" | "left" | "right";
 
+export type WindowSnapAnchor =
+  | "free"
+  | "left"
+  | "right"
+  | "top"
+  | "bottom"
+  | "top-left"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-right"
+  | "maximize";
+
 export type WindowFrameState = {
   mode: "fullscreen" | "windowed";
   width: number;
@@ -38,6 +50,10 @@ export type WindowFrameState = {
   /** Outer position in physical pixels; x/y < 0 means center on restore. */
   x: number;
   y: number;
+  /** Windows desktop snap layout; restored from monitor work area when set. */
+  anchor?: WindowSnapAnchor;
+  /** Monitor that held the snap layout (best-effort, for multi-monitor restore). */
+  monitorName?: string | null;
 };
 
 /** Per-panel tile on the canvas desk. */
@@ -54,8 +70,16 @@ export type TileLayout = {
   pixelLock?: { left: number; top: number; width: number; height: number };
 };
 
-export type { CanvasMode, CanvasProfile, GridCanvasState } from "./canvas-profiles";
-export type { SplitCanvasState, BuiltInPreset, SplitNode } from "./split-layout";
+export type {
+  CanvasMode,
+  CanvasProfile,
+  GridCanvasState,
+} from "./canvas-profiles";
+export type {
+  SplitCanvasState,
+  BuiltInPreset,
+  SplitNode,
+} from "./split-layout";
 
 export type PersistedShellState = {
   menuDock: MenuDock;

@@ -34,6 +34,8 @@ mod shell_cursor;
 mod startup_config;
 mod types;
 mod version;
+mod window_frame;
+mod workbench_prefs;
 
 use capability::{CapabilityRegistry, Capabilities};
 use commands::CommandRegistry;
@@ -41,7 +43,8 @@ use context::{AppState, CoreContext, InMemoryConfigStore};
 use events::EventBus;
 use extensions::{
     chat_panel, clock_panel, context_editor, hello_panel, hello_world, host, http_api,
-    mcp_bridge, provider_lmstudio, run_logger, session_store, skill_runner, transcript, validation,
+    mcp_bridge, provider_llamacpp, provider_lmstudio, provider_ollama, provider_router,
+    registry, run_logger, session_store, skill_runner, transcript, validation, workbench,
 };
 use startup_config::load_startup_config;
 use permission::PermissionGate;
@@ -76,6 +79,13 @@ fn load_extensions(extensions_dir: &std::path::Path, ctx: &CoreContext) {
     if let Err(e) = ctx.config.set("host", "canvas", canvas_config) {
         eprintln!("[CONFIG] failed to store canvas config: {e}");
     }
+    if let Err(e) = ctx.config.set(
+        "provider-router",
+        "active",
+        serde_json::json!({ "instance": startup.active_provider }),
+    ) {
+        eprintln!("[CONFIG] failed to store active provider: {e}");
+    }
 
     if let Some(ref enabled) = startup.enabled_extensions {
         for panel_id in &startup.open_panels {
@@ -95,6 +105,16 @@ fn load_extensions(extensions_dir: &std::path::Path, ctx: &CoreContext) {
     loader.register("provider-lmstudio", |m| {
         Arc::new(provider_lmstudio::LmStudioProvider::new(m))
     });
+    loader.register("provider-ollama", |m| {
+        Arc::new(provider_ollama::OllamaProvider::new(m))
+    });
+    loader.register("provider-llamacpp", |m| {
+        Arc::new(provider_llamacpp::LlamaCppProvider::new(m))
+    });
+    let active_provider = startup.active_provider.clone();
+    loader.register("provider-router", move |m| {
+        Arc::new(provider_router::ProviderRouter::new(m, active_provider.clone()))
+    });
     loader.register("transcript", |m| Arc::new(transcript::TranscriptExtension::new(m)));
     loader.register("session-store", |m| Arc::new(session_store::SessionStoreExtension::new(m)));
     loader.register("http-api", |m| Arc::new(http_api::HttpApiExtension::new(m)));
@@ -108,6 +128,8 @@ fn load_extensions(extensions_dir: &std::path::Path, ctx: &CoreContext) {
     });
     loader.register("validation", |m| Arc::new(validation::ValidationExtension::new(m)));
     loader.register("run-logger", |m| Arc::new(run_logger::RunLoggerExtension::new(m)));
+    loader.register("registry", |m| Arc::new(registry::RegistryExtension::new(m)));
+    loader.register("workbench", |m| Arc::new(workbench::WorkbenchExtension::new(m)));
 
     match loader.scan_and_load(
         extensions_dir,
@@ -133,6 +155,19 @@ fn load_extensions(extensions_dir: &std::path::Path, ctx: &CoreContext) {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                if let Some(frame) = window_frame::load(app.handle()) {
+                    if let Err(e) = window_frame::apply(&window, &frame) {
+                        eprintln!("[window-frame] startup apply failed: {e}");
+                    } else {
+                        eprintln!(
+                            "[window-frame] applied {:?} before show ({}x{} @ {}, {})",
+                            frame.mode, frame.width, frame.height, frame.x, frame.y
+                        );
+                    }
+                }
+            }
+
             // Resolve extensions directory:
             //   - production: <resource_dir>/extensions/
             //   - development: <cwd>/extensions/  (workspace root)
@@ -167,6 +202,7 @@ pub fn run() {
             ipc::core_invoke,
             ipc::core_list_commands,
             shell_cursor::shell_cursor_client,
+            window_frame::sync_window_frame,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nulqor");

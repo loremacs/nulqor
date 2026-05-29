@@ -398,7 +398,7 @@ mod tests {
             api_version: "v1".into(),
             schema_version: semver::Version::parse("1.0.0").unwrap(),
             min_core: semver::Version::parse("0.1.0").unwrap(),
-            requires: vec!["provider-lmstudio".into()],
+            requires: vec!["provider-router".into()],
             optional: vec![],
             provides: vec![],
             commands: vec![],

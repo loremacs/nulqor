@@ -15,6 +15,20 @@ Agent reference for `extensions/host/ui/` layout. Spec: `docs/decisions/007-canv
 
 ---
 
+## Window mode vs click-through
+
+Spec detail: `docs/PROJECT_FEATURES.md` §0.7. Code: `shell.ts` (`applyWindowModePolicy`), `click-through.ts`, `window-chrome/windows.ts`.
+
+| | Fullscreen | Windowed |
+|---|------------|----------|
+| Pass-through | Per Settings (`click_through`) | **Off** always |
+| Background | Transparent | Opaque `#121216` |
+| Disabled setting row | N/A | Grey text + `(fullscreen only)` hint; **no hover tooltip** (VS Code pattern); click → red top toast |
+
+Do not enable `setIgnoreCursorEvents(true)` when `data-window-mode="windowed"` or when poll runs with pass-through disabled.
+
+---
+
 ## Split tree vs DOM
 
 The split **tree** is the source of truth for persistence; the **DOM** is the source of truth during drag.

@@ -6,6 +6,7 @@ api-version    = "v1"
 schema-version = "1.0.0"
 min-core       = "0.1.0"
 requires       = ["host"]
+fs-scopes      = [".nulqor/", "AGENTS.md", "agents/", "rules/", "skills/"]
 
 [[commands]]
 id           = "context-editor:reload@1"
@@ -39,8 +40,57 @@ input-schema  = '{ "name": "string" }'
 output-schema = '{ "name": "string", "description": "string", "body": "string" }'
 
 [[commands]]
+id           = "context-editor:load-rule@1"
+owner        = "context-editor"
+permission   = "read"
+input-schema  = '{ "filename": "string" }'
+output-schema = '{ "filename": "string", "excerpt": "string", "body": "string" }'
+
+[[commands]]
+id           = "context-editor:load-agent@1"
+owner        = "context-editor"
+permission   = "read"
+input-schema  = '{ "name": "string" }'
+output-schema = '{ "name": "string", "path": "string", "body": "string" }'
+
+[[commands]]
+id           = "context-editor:save-skill@1"
+owner        = "context-editor"
+permission   = "write"
+input-schema  = '{ "name": "string", "body": "string" }'
+output-schema = '{ "name": "string", "path": "string" }'
+
+[[commands]]
+id           = "context-editor:save-rule@1"
+owner        = "context-editor"
+permission   = "write"
+input-schema  = '{ "filename": "string", "body": "string" }'
+output-schema = '{ "filename": "string", "path": "string" }'
+
+[[commands]]
+id           = "context-editor:save-agent@1"
+owner        = "context-editor"
+permission   = "write"
+input-schema  = '{ "name": "string", "body": "string" }'
+output-schema = '{ "name": "string", "path": "string" }'
+
+[[commands]]
 id           = "context-editor:system-prompt@1"
 owner        = "context-editor"
 permission   = "read"
-input-schema  = '{ "agent": "string?" }'
+input-schema  = '{ "session_id": "string?", "agent": "string?" }'
 output-schema = '{ "prompt": "string", "token_estimate": "number" }'
+
+[[commands]]
+id           = "context-editor:context-profile@1"
+owner        = "context-editor"
+permission   = "read"
+input-schema  = '{ "session_id": "string?" }'
+output-schema = '{ "session_id": "string", "active_agent": "string", "token_estimate": "number", "agents": "array", "rules": "array", "skills": "array" }'
+
+[[commands]]
+id           = "context-editor:set-context-profile@1"
+owner        = "context-editor"
+permission   = "write"
+input-schema  = '{ "session_id": "string?", "active_agent": "string?", "agent": "object?", "rule": "object?", "skill": "object?" }'
+output-schema = '{ "session_id": "string", "active_agent": "string", "token_estimate": "number", "agents": "array", "rules": "array", "skills": "array" }'

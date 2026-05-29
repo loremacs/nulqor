@@ -32,29 +32,40 @@ when:         Communicating with a running Nulqor instance
 inputs:       action, message (send), observer_name, optional model/agent
 outputs:      api_json; assistant_reply when send succeeds
 side-effects: may send messages and register observers on the running app
-validation:   chat.ps1 health returns ok; errors reported with output
+validation:   chat.ps1 -Action ready returns ok; send fails fast if provider not connected
 ```
 
 ---
 
 ## Steps
 
-1. Health: `skills/nulqor-communicate/scripts/chat.ps1 -Action health`
+1. App + provider: `skills/nulqor-communicate/scripts/chat.ps1 -Action ready`
 
-2. Register + send:
+   Fails fast with a hint if the app is down, LM Studio is unreachable, no model is loaded, or chat-panel never clicked **Connect** (`active` model unset).
+
+2. Connect (if `ready` reports `no_active_model`):
+
+   ```powershell
+   skills/nulqor-communicate/scripts/chat.ps1 -Action connect -Url http://localhost:1234/v1
+   ```
+
+3. Register + send:
 
    ```powershell
    skills/nulqor-communicate/scripts/chat.ps1 -Action register -ObserverName "my-agent"
    skills/nulqor-communicate/scripts/chat.ps1 -Action send -Message "..." -ObserverName "my-agent"
    ```
 
-3. Full surfaces: [REFERENCE.md](REFERENCE.md). Also `scripts/chat.sh` on Unix.
+   `send` runs the same provider preflight as `ready` unless `-SkipProviderCheck` is passed.
 
-4. After HTTP route changes, update this skill and `docs/decisions/006-http-api-and-observer-protocol.md`.
+4. Full surfaces: [REFERENCE.md](REFERENCE.md). Also `scripts/chat.sh` on Unix.
+
+5. After HTTP route changes, update this skill and `docs/decisions/006-http-api-and-observer-protocol.md`.
 
 ---
 
 ## Verification
 
-- [ ] `chat.ps1 -Action health` succeeds.
+- [ ] `chat.ps1 -Action ready` returns `ok: true` with `active` model set.
+- [ ] `chat.ps1 -Action send` fails immediately when provider is not connected (no long wait).
 - [ ] Observer registered before send when required.

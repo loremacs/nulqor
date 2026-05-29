@@ -1,7 +1,6 @@
-import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import { DEFAULT_WINDOWED_FRAME } from "../window-frame";
+import { applyWindowedFrame, getWindowedRestoreTarget } from "../window-frame";
 import type {
   WindowChromeContext,
   WindowChromeHandle,
@@ -88,6 +87,7 @@ function mount(ctx: WindowChromeContext): WindowChromeHandle {
     restoreBtn,
     getWindowFrame,
     refreshWindowFrame,
+    flushWindowFrame,
     onLayoutChanged,
     onMenuDockDrag,
     onMenuDockDragMove,
@@ -96,6 +96,15 @@ function mount(ctx: WindowChromeContext): WindowChromeHandle {
   } = ctx;
   let windowMode = ctx.initialMode;
   let togglingFullscreen = false;
+  let framePersistTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const scheduleWindowFramePersist = (): void => {
+    if (framePersistTimer) clearTimeout(framePersistTimer);
+    framePersistTimer = setTimeout(() => {
+      framePersistTimer = null;
+      void refreshWindowFrame();
+    }, 180);
+  };
 
   const setWindowMode = (mode: WindowMode): void => {
     if (mode === windowMode) return;
@@ -124,16 +133,7 @@ function mount(ctx: WindowChromeContext): WindowChromeHandle {
       const fullscreen = await win.isFullscreen();
       if (fullscreen) {
         setWindowMode("windowed");
-        const windowFrame = getWindowFrame();
-        const target = windowFrame.mode === "windowed" ? windowFrame : DEFAULT_WINDOWED_FRAME;
-        await win.setFullscreen(false);
-        await win.setResizable(true);
-        await win.setSize(new LogicalSize(target.width, target.height));
-        if (target.x < 0 || target.y < 0) {
-          await win.center();
-        } else {
-          await win.setPosition(new PhysicalPosition(target.x, target.y));
-        }
+        await applyWindowedFrame(getWindowedRestoreTarget(getWindowFrame()));
       } else {
         await refreshWindowFrame();
         setWindowMode("fullscreen");
@@ -184,6 +184,10 @@ function mount(ctx: WindowChromeContext): WindowChromeHandle {
   void getCurrentWindow()
     .onCloseRequested(async (event) => {
       event.preventDefault();
+      if (framePersistTimer) {
+        clearTimeout(framePersistTimer);
+        framePersistTimer = null;
+      }
       await refreshWindowFrame();
       await getCurrentWindow().destroy();
     })
@@ -191,9 +195,18 @@ function mount(ctx: WindowChromeContext): WindowChromeHandle {
       console.warn("[window-chrome] onCloseRequested unavailable:", err);
     });
 
+  window.addEventListener("pagehide", () => {
+    if (framePersistTimer) {
+      clearTimeout(framePersistTimer);
+      framePersistTimer = null;
+    }
+    flushWindowFrame?.();
+    void refreshWindowFrame();
+  });
+
   void getCurrentWindow()
     .onMoved(() => {
-      if (windowMode === "windowed") void refreshWindowFrame();
+      scheduleWindowFramePersist();
     })
     .catch((err) => {
       console.warn("[window-chrome] onMoved unavailable:", err);
@@ -203,7 +216,7 @@ function mount(ctx: WindowChromeContext): WindowChromeHandle {
     .onResized(() => {
       onLayoutChanged();
       void syncUi();
-      if (windowMode === "windowed") void refreshWindowFrame();
+      scheduleWindowFramePersist();
     })
     .catch((err) => {
       console.warn("[window-chrome] onResized unavailable:", err);

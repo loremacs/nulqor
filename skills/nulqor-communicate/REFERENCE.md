@@ -10,9 +10,9 @@ Base URL: `NULQOR_API_URL` or `http://127.0.0.1:8080`.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/health` | `{ "ok": true }` |
-| POST | `/connect` | Set LM Studio URL |
-| GET | `/models` | List models |
+| GET | `/health` | `{ "ok": true }` — app only; does not check LM Studio |
+| GET | `/models` | `{ "models": [...], "active": "string|null" }` — `active` set after Connect |
+| POST | `/connect` | Set LM Studio URL; sets active model |
 | GET | `/transcript` | Full session + `transcript_hash` |
 | POST | `/message` | Send user turn (requires `observer_name`) |
 | POST | `/observers/register` | Register IDE agent |
@@ -68,9 +68,14 @@ Connect via `.cursor/mcp.json` with `cargo run --manifest-path tools/mcp-server/
 | Symptom | Fix |
 |---|---|
 | Connection refused :8080 | `npm start` |
-| observer not registered | `-Action register` first |
-| No assistant reply | LM Studio + loaded model |
+| `ready` → `no_active_model` | Click **Disconnect** then **Connect** in chat-panel, or `chat.ps1 -Action connect` |
+| `ready` → `provider_unreachable` | Start LM Studio; load a model |
+| `ready` → `no_models_loaded` | Load a model in LM Studio, then `-Action connect` |
+| observer not registered | `-Action register` first (send auto-registers) |
+| No assistant reply after send | Re-run `-Action ready`; check LM Studio logs |
 | `/connect` hung (historical) | Rebuild app (`block_on_compat` fix) |
+
+**chat.ps1 actions:** `ready` = app + provider preflight; `health` = app only.
 
 ---
 

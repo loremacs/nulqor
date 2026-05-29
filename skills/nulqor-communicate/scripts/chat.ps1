@@ -5,7 +5,7 @@
   Wrapper for the Phase 2 HTTP API (decisions/006). Use when the Tauri app is running
   (npm start). External agents must register an observer before sending messages.
 .PARAMETER Action
-  health | connect | models | register | send | transcript | catch-up | ack | observers
+  health | ready | connect | select-model | models | register | send | transcript | catch-up | ack | observers
 .PARAMETER BaseUrl
   API base URL. Default: http://127.0.0.1:8080 or NULQOR_API_URL env var.
 .PARAMETER Message
@@ -24,9 +24,11 @@
   For catch-up: advance ack pointer after returning events.
 .PARAMETER Quiet
   Suppress OK output on success (still prints message content for send).
+.PARAMETER SkipProviderCheck
+  For Action=send only: skip LM Studio / active-model preflight (not recommended).
 #>
 param(
-    [ValidateSet("health", "connect", "models", "register", "send", "transcript", "catch-up", "ack", "observers")]
+    [ValidateSet("health", "ready", "connect", "select-model", "models", "register", "send", "transcript", "catch-up", "ack", "observers")]
     [string]$Action = "send",
 
     [string]$BaseUrl = "",
@@ -45,7 +47,9 @@ param(
 
     [switch]$AutoAck,
 
-    [switch]$Quiet
+    [switch]$Quiet,
+
+    [switch]$SkipProviderCheck
 )
 
 $ErrorActionPreference = "Stop"
@@ -72,13 +76,117 @@ function Write-Result {
     }
 }
 
+function Get-ProviderStatus {
+    param(
+        [string]$RequiredModel = "",
+        [switch]$RequireApp
+    )
+
+    $status = [ordered]@{
+        ok              = $false
+        app             = $false
+        provider_ready  = $false
+        reason          = ""
+        hint            = ""
+        active          = $null
+        models          = @()
+        model_count     = 0
+        model           = $null
+    }
+
+    try {
+        $health = Invoke-NulqorGet "/health"
+        if (-not $health.ok) {
+            $status.reason = "app_unhealthy"
+            $status.hint = "Nulqor /health returned ok=false. Restart: npm start"
+            return $status
+        }
+        $status.app = $true
+    }
+    catch {
+        $status.reason = "app_unreachable"
+        $status.hint = "Start the Nulqor app (npm start). Connection refused at $BaseUrl"
+        return $status
+    }
+
+    try {
+        $modelsResp = Invoke-NulqorGet "/models?refresh=true"
+        if ($modelsResp.models) {
+            $status.models = @($modelsResp.models)
+        }
+        $status.model_count = $status.models.Count
+        $status.active = $modelsResp.active
+    }
+    catch {
+        $status.reason = "provider_unreachable"
+        $status.hint = "LM Studio not reachable. Start LM Studio, load a model, then:`n  chat.ps1 -Action connect -Url $Url`nOr click Connect in the chat-panel."
+        return $status
+    }
+
+    if ($status.model_count -eq 0) {
+        $status.reason = "no_models_loaded"
+        $status.hint = "LM Studio returned no models. Load a model in LM Studio, then:`n  chat.ps1 -Action connect -Url $Url"
+        return $status
+    }
+
+    $modelToUse = if ($RequiredModel) { $RequiredModel } else { $status.active }
+    if ([string]::IsNullOrWhiteSpace($modelToUse)) {
+        $status.reason = "no_active_model"
+        $status.hint = "Provider is not connected in the app (no active model). Click Connect in chat-panel or run:`n  chat.ps1 -Action connect -Url $Url"
+        return $status
+    }
+
+    if ($RequiredModel -and ($RequiredModel -notin $status.models)) {
+        $status.reason = "model_not_found"
+        $status.hint = "Model '$RequiredModel' is not in the provider list. Run chat.ps1 -Action models"
+        return $status
+    }
+
+    $status.model = $modelToUse
+    $status.provider_ready = $true
+    $status.ok = $true
+    return $status
+}
+
+function Assert-ProviderReady {
+    param([string]$RequiredModel = "")
+
+    $status = Get-ProviderStatus -RequiredModel $RequiredModel
+    if ($status.ok) {
+        return $status
+    }
+
+    Write-Host "FAIL: provider not ready ($($status.reason))"
+    if ($status.hint) {
+        Write-Host $status.hint
+    }
+    if (-not $Quiet) {
+        $status | ConvertTo-Json -Depth 6
+    }
+    exit 1
+}
+
 switch ($Action) {
     "health" {
         Write-Result (Invoke-NulqorGet "/health")
     }
 
+    "ready" {
+        $status = Get-ProviderStatus -RequiredModel $Model
+        Write-Result $status
+        if (-not $status.ok) { exit 1 }
+    }
+
     "connect" {
         Write-Result (Invoke-NulqorPost "/connect" @{ url = $Url })
+    }
+
+    "select-model" {
+        if ([string]::IsNullOrWhiteSpace($Model)) {
+            Write-Host "FAIL: -Model required for Action=select-model"
+            exit 1
+        }
+        Write-Result (Invoke-NulqorPost "/select-model" @{ model = $Model })
     }
 
     "models" {
@@ -111,6 +219,10 @@ switch ($Action) {
         if ([string]::IsNullOrWhiteSpace($Message)) {
             Write-Host "FAIL: -Message required for Action=send"
             exit 1
+        }
+
+        if (-not $SkipProviderCheck) {
+            Assert-ProviderReady -RequiredModel $Model | Out-Null
         }
 
         # Ensure observer exists (idempotent register)
@@ -155,7 +267,10 @@ switch ($Action) {
             }
         }
 
-        Write-Host "FAIL: no assistant reply within ${WaitSeconds}s (user message may have been added)"
+        Write-Host "FAIL: no assistant reply within ${WaitSeconds}s"
+        if (-not $SkipProviderCheck) {
+            Write-Host "Hint: run chat.ps1 -Action ready - provider may have disconnected or generation failed."
+        }
         Invoke-NulqorGet "/transcript" | ConvertTo-Json -Depth 6
         exit 1
     }

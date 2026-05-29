@@ -4,6 +4,8 @@ Ideas for later. **Not** the active queue — see `TASKS.md` for committed work 
 `docs/BUILD_PLAN.md` for phased gates. Capture possibilities here; move an item to `TASKS.md`
 when you decide to schedule it.
 
+**New session — chat / sessions / group chat:** read [`docs/decisions/009-sessions-file-store.draft.md`](docs/decisions/009-sessions-file-store.draft.md) first (v1 shipped vs designed gaps). Shipped behaviour: `docs/PROJECT_FEATURES.md` §2.4–2.4b. Checkbox backlog: **Chat, sessions & group chat** below.
+
 Captured from architecture discussion (2026-05-24): compiled core, workspace boundaries,
 GUI vs CLI hosts, clutter reduction.
 
@@ -24,10 +26,65 @@ GUI vs CLI hosts, clutter reduction.
 - [ ] **Re-save old mixed layout profiles** — slots saved before recent layout fixes may still
   hold bad `pixelLock` data; re-save after host stability work for clean round-trips.
 - [x] **Canvas manual test checklist** — in [`skills/canvas-layout/REFERENCE.md`](skills/canvas-layout/REFERENCE.md).
-- [ ] **Sync `docs/PROJECT_FEATURES.md` canvas section** — split-render / profile / sub-grid
-      fixes may lag the feature record; update when host stability pass is done.
+- [ ] **Sync `docs/PROJECT_FEATURES.md` canvas section** — window mode + click-through rules updated (2026-05); split-render / profile items may still lag. Optional: promote window-mode rules to `docs/decisions/008-window-mode-ui.draft.md`.
+- [x] **Session / chat UI decision** — [`docs/decisions/009-sessions-file-store.draft.md`](docs/decisions/009-sessions-file-store.draft.md) (canonical handoff). Checkbox backlog: **Chat, sessions & group chat** below.
 - [ ] **Sync `docs/PHASES.md`** — still oriented to Phase 2; TASKS shows Phase 3 mostly complete.
       Align quick-reference with `TASKS.md` so agents read the right “current phase.”
+
+---
+
+## Chat, sessions & group chat (designed — not fully built)
+
+Captured from architecture discussion (2026-05). **v1 shipped:** `session-store` + `chat-panel` (file persistence, rail, fork-on-edit, overlay). Everything below is **not implemented** or only partially so.
+
+### Storage & catalog
+
+- [ ] **`human/catalog/INDEX.md`** — human-readable session index with title, date, summary links (today: `catalog.json` only).
+- [ ] **Session frontmatter / metadata header** — per-session `mode`, `title`, `participants`, `branch_policy` in file header (today: jsonl lines only + catalog fields).
+- [ ] **Project-scoped vs global sessions** — `.nulqor/` under project root vs user home; not decided in config.
+- [ ] **Import `runs/*.jsonl`** into reopenable sessions (or keep runs audit-only).
+- [ ] **SQLite + FTS indexer** (Phase 4) — deep search over same files; not a second truth store.
+
+### Session modes (thread vs room / group)
+
+- [ ] **`mode: thread`** (default) — linear assistant context; edit truncates or forks active branch.
+- [ ] **`mode: room`** — Discord/Slack-style group: many humans + many agents; **in-place edits** (no truncate/regenerate); chronological shared log; no fork-on-edit.
+- [ ] **Participant roster** — explicit `participants[]` on session (today: per-message `participant_name` only).
+- [ ] **Multi-agent interleave** — room mode agents reply without single `active_agent` monopoly (design TBD).
+
+### Thread mode — branches & agent isolation
+
+- [ ] **`branch_policy: preserve`** (default) vs `truncate` — preserve = snapshot old tail to `human/branches/` on edit (partially built); truncate = discard tail with no archive.
+- [ ] **Agent must not read archived branches** — enforce in generate/MCP paths (design rule; not fully gated — `human/**` not loaded but no explicit capability wall).
+- [ ] **Optional override** — one-shot `include_archived_branches` on generate; logged; non-default.
+- [ ] **Restore branch as active** — explicit human action (would fork again); not built.
+- [ ] **True branching UI** — multiple live branches (today: one active + archived snapshots only).
+
+### Human rail (conversation map)
+
+- [ ] **Rail is human-only** — never exposed to MCP/agent commands (partially true; needs capability/permission gate).
+- [ ] **Main chat shows no fork chrome** — fork access only via rail (v1: rail fork row + overlay; OK).
+- [ ] **Symbol picker** — ★ ⚑ ? 💡 presets for user bookmarks (v1: partial via Mark dropdown).
+- [ ] **POI / verbose markers** — flag long reasoning or tool dumps on rail without cluttering main chat.
+- [ ] **Filters** — All | Human | Agents | Bookmarks | Forks.
+- [ ] **Optional ghost archived branch** in rail (dimmed timeline); not built.
+- [ ] **Regenerate INDEX / summaries** from session headers on list.
+
+### Message payload & extras
+
+- [ ] **`payload` object** on messages — `reasoning`, tool calls/results, system prompt hash, token stats (today: top-level `reasoning` only).
+- [ ] **Frozen payload in archived forks** — full audit for human inspection.
+
+### Surfaces & parity
+
+- [ ] **`cli-panel`** — `session list`, `session open`, `rail list/jump`, `branch show` (same commands as UI).
+- [ ] **Chat streaming** — live token stream via Tauri events (today: 2s poll).
+- [ ] **Session search** — by title, date, marker, FTS.
+- [ ] **Room mode UI** — roster, per-speaker bubbles, edit-in-place UX.
+
+### Decision doc
+
+- [x] **`docs/decisions/009-sessions-file-store.draft.md`** — canonical spec + handoff for next session.
 
 ---
 
@@ -67,7 +124,9 @@ GUI vs CLI hosts, clutter reduction.
 | Active phase work                        | `TASKS.md`, `docs/PHASES.md`              |
 | SQLite, `.nulqor`, agent loop            | Phase 4 in `docs/BUILD_PLAN.md`           |
 | Bake/export, A/B compare, memory         | Phase 5+ in `docs/BUILD_PLAN.md`          |
-| Canvas vs Bundle concept                 | `docs/GOAL.md` §179                       |
+| Host window mode + click-through UI | `docs/PROJECT_FEATURES.md` §0.7, `skills/canvas-layout/REFERENCE.md` |
+| Chat/session v1 (implemented) | `docs/PROJECT_FEATURES.md` §2.4–2.4b, `extensions/session-store/README.md` |
+| Chat/session/group (design + gaps) | `docs/decisions/009-sessions-file-store.draft.md`, `BACKLOG.md` § Chat |
 | Frozen core (8 responsibilities)         | `docs/DESIGN.md` §2, `docs/decisions/001` |
 | “Dynamic load can wait” (Phase 1 choice) | `archive/product-brief-monolith.md`       |
 

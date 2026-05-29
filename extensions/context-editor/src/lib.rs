@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::context::{CoreContext, Extension};
 use crate::error::CoreError;
@@ -56,6 +56,261 @@ pub struct ContextStore {
     pub skills: Vec<SkillMeta>,
     pub agents: HashMap<String, AgentMeta>,
     pub rules: Vec<RuleMeta>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ContextPreferences {
+    #[serde(default = "default_active_agent")]
+    pub active_agent: String,
+    #[serde(default)]
+    pub disabled_agents: Vec<String>,
+    #[serde(default)]
+    pub disabled_rules: Vec<String>,
+    #[serde(default)]
+    pub disabled_skills: Vec<String>,
+}
+
+impl Default for ContextPreferences {
+    fn default() -> Self {
+        Self {
+            active_agent: default_active_agent(),
+            disabled_agents: Vec::new(),
+            disabled_rules: Vec::new(),
+            disabled_skills: Vec::new(),
+        }
+    }
+}
+
+fn default_active_agent() -> String {
+    "default".into()
+}
+
+impl ContextPreferences {
+    fn agent_enabled(&self, name: &str) -> bool {
+        !self.disabled_agents.iter().any(|n| n == name)
+    }
+
+    fn rule_enabled(&self, filename: &str) -> bool {
+        !self.disabled_rules.iter().any(|f| f == filename)
+    }
+
+    fn skill_enabled(&self, name: &str) -> bool {
+        !self.disabled_skills.iter().any(|n| n == name)
+    }
+
+    fn set_agent_enabled(&mut self, name: &str, enabled: bool) {
+        self.disabled_agents.retain(|n| n != name);
+        if enabled {
+            self.active_agent = name.to_owned();
+        } else if self.active_agent == name {
+            self.disabled_agents.push(name.to_owned());
+        }
+    }
+
+    fn set_rule_enabled(&mut self, filename: &str, enabled: bool) {
+        self.disabled_rules.retain(|f| f != filename);
+        if !enabled {
+            self.disabled_rules.push(filename.to_owned());
+        }
+    }
+
+    fn set_skill_enabled(&mut self, name: &str, enabled: bool) {
+        self.disabled_skills.retain(|n| n != name);
+        if !enabled {
+            self.disabled_skills.push(name.to_owned());
+        }
+    }
+}
+
+fn load_workbench_prefs(root: &Path) -> crate::workbench_prefs::WorkbenchPrefs {
+    crate::workbench_prefs::load(root)
+}
+
+fn effective_agent_enabled(
+    global: &crate::workbench_prefs::WorkbenchPrefs,
+    session: &ContextPreferences,
+    name: &str,
+) -> bool {
+    global.agent_enabled(name) && session.agent_enabled(name)
+}
+
+fn effective_rule_enabled(
+    global: &crate::workbench_prefs::WorkbenchPrefs,
+    session: &ContextPreferences,
+    filename: &str,
+) -> bool {
+    global.rule_enabled(filename) && session.rule_enabled(filename)
+}
+
+fn effective_skill_enabled(
+    global: &crate::workbench_prefs::WorkbenchPrefs,
+    session: &ContextPreferences,
+    name: &str,
+) -> bool {
+    global.skill_enabled(name) && session.skill_enabled(name)
+}
+
+fn legacy_preferences_path(root: &Path) -> PathBuf {
+    root.join(".nulqor").join("context-preferences.json")
+}
+
+fn session_context_path(root: &Path, session_id: &str) -> PathBuf {
+    root.join(".nulqor")
+        .join("sessions")
+        .join(format!("{session_id}.context.json"))
+}
+
+fn load_session_preferences(root: &Path, session_id: &str) -> ContextPreferences {
+    let path = session_context_path(root, session_id);
+    if path.exists() {
+        return std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default();
+    }
+
+    let legacy = legacy_preferences_path(root);
+    if legacy.exists() {
+        let prefs = std::fs::read_to_string(&legacy)
+            .ok()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default();
+        let _ = save_session_preferences(root, session_id, &prefs);
+        return prefs;
+    }
+
+    ContextPreferences::default()
+}
+
+fn save_session_preferences(
+    root: &Path,
+    session_id: &str,
+    prefs: &ContextPreferences,
+) -> Result<(), CoreError> {
+    let path = session_context_path(root, session_id);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| CoreError::Io(format!("create {}: {e}", parent.display())))?;
+    }
+    let json = serde_json::to_string_pretty(prefs)
+        .map_err(|e| CoreError::Io(format!("serialize session context: {e}")))?;
+    std::fs::write(&path, json)
+        .map_err(|e| CoreError::Io(format!("write {}: {e}", path.display())))
+}
+
+fn resolve_session_id(
+    cmds: &crate::commands::CommandRegistry,
+    input: &serde_json::Value,
+) -> Result<String, CoreError> {
+    if let Some(id) = input.get("session_id").and_then(|v| v.as_str()) {
+        if !id.is_empty() {
+            return Ok(id.to_owned());
+        }
+    }
+    let result = cmds.invoke(
+        "session-store",
+        &CommandId::parse("sessions:active@1")
+            .map_err(|e| CoreError::Io(format!("sessions:active parse: {e}")))?,
+        serde_json::json!({}),
+    )?;
+    result
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| CoreError::Io("no active session".into()))
+}
+
+fn agent_source_path(name: &str) -> String {
+    if name == "default" {
+        "AGENTS.md".into()
+    } else {
+        format!("agents/{name}.md")
+    }
+}
+
+fn skill_source_path(name: &str) -> String {
+    format!("skills/{name}/SKILL.md")
+}
+
+fn is_kebab_case(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && !s.starts_with('-')
+        && !s.ends_with('-')
+}
+
+fn validate_rule_filename(filename: &str) -> Result<(), CoreError> {
+    if filename.contains('/') || filename.contains('\\') {
+        return Err(CoreError::Io("rule filename must not contain path separators".into()));
+    }
+    let stem = Path::new(filename)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    if stem == "INDEX" {
+        return Err(CoreError::Io("cannot write rules/INDEX.*".into()));
+    }
+    let ext = Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    if !matches!(ext, "md" | "mdc" | "txt") {
+        return Err(CoreError::Io(
+            "rule filename must end with .md, .mdc, or .txt".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn write_skill(root: &Path, name: &str, body: &str) -> Result<String, CoreError> {
+    if !is_kebab_case(name) {
+        return Err(CoreError::Io(format!("invalid skill name '{name}'")));
+    }
+    let dir = root.join("skills").join(name);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| CoreError::Io(format!("create {}: {e}", dir.display())))?;
+    let path = dir.join("SKILL.md");
+    std::fs::write(&path, body)
+        .map_err(|e| CoreError::Io(format!("write {}: {e}", path.display())))?;
+    Ok(skill_source_path(name))
+}
+
+fn write_rule(root: &Path, filename: &str, body: &str) -> Result<String, CoreError> {
+    validate_rule_filename(filename)?;
+    let path = root.join("rules").join(filename);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| CoreError::Io(format!("create {}: {e}", parent.display())))?;
+    }
+    std::fs::write(&path, body)
+        .map_err(|e| CoreError::Io(format!("write {}: {e}", path.display())))?;
+    Ok(format!("rules/{filename}"))
+}
+
+fn write_agent(root: &Path, name: &str, body: &str) -> Result<String, CoreError> {
+    if name == "default" {
+        let path = root.join("AGENTS.md");
+        std::fs::write(&path, body)
+            .map_err(|e| CoreError::Io(format!("write {}: {e}", path.display())))?;
+        return Ok("AGENTS.md".into());
+    }
+    if !is_kebab_case(name) {
+        return Err(CoreError::Io(format!("invalid agent name '{name}'")));
+    }
+    let agents_dir = root.join("agents");
+    std::fs::create_dir_all(&agents_dir)
+        .map_err(|e| CoreError::Io(format!("create {}: {e}", agents_dir.display())))?;
+    let path = agents_dir.join(format!("{name}.md"));
+    std::fs::write(&path, body)
+        .map_err(|e| CoreError::Io(format!("write {}: {e}", path.display())))?;
+    Ok(agent_source_path(name))
+}
+
+fn reload_store(store: &Arc<RwLock<ContextStore>>) {
+    let root = resolve_workspace_root();
+    *store.write().unwrap() = ContextStore::load_from(&root);
 }
 
 impl ContextStore {
@@ -108,9 +363,13 @@ impl ContextStore {
             e.flatten()
                 .filter(|e| {
                     let p = e.path();
+                    let filename = p
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
                     let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
-                    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                    matches!(ext, "md" | "mdc" | "txt") && stem != "INDEX"
+                    matches!(ext, "md" | "mdc" | "txt")
+                        && !crate::workbench_prefs::is_rules_index_file(&filename)
                 })
                 .collect::<Vec<_>>()
         }) {
@@ -127,20 +386,34 @@ impl ContextStore {
         store
     }
 
-    /// Assemble system prompt per decisions/006 §6.
-    pub fn assemble_system_prompt(&self, agent: Option<&str>) -> String {
-        let agent_key = agent.unwrap_or("default");
+    /// Assemble system prompt per decisions/006 §6, honoring user toggles.
+    pub fn assemble_system_prompt(
+        &self,
+        agent: Option<&str>,
+        prefs: &ContextPreferences,
+        global: &crate::workbench_prefs::WorkbenchPrefs,
+    ) -> String {
+        let agent_key = agent.unwrap_or(&prefs.active_agent);
         let mut parts: Vec<String> = Vec::new();
 
         // 1. Agent persona
-        if let Some(a) = self.agents.get(agent_key).or_else(|| self.agents.get("default")) {
-            parts.push(interpolate_date(&a.body));
+        if !agent_key.is_empty()
+            && effective_agent_enabled(global, prefs, agent_key)
+        {
+            if let Some(a) = self.agents.get(agent_key) {
+                parts.push(interpolate_date(&a.body));
+            }
         }
 
         // 2. Rules (concatenated in alphabetical order, date placeholders resolved)
-        if !self.rules.is_empty() {
+        let active_rules: Vec<_> = self
+            .rules
+            .iter()
+            .filter(|r| effective_rule_enabled(global, prefs, &r.filename))
+            .collect();
+        if !active_rules.is_empty() {
             parts.push(
-                self.rules
+                active_rules
                     .iter()
                     .map(|r| interpolate_date(&r.body))
                     .collect::<Vec<_>>()
@@ -149,9 +422,13 @@ impl ContextStore {
         }
 
         // 3. Compact skill index
-        if !self.skills.is_empty() {
-            let index = self
-                .skills
+        let active_skills: Vec<_> = self
+            .skills
+            .iter()
+            .filter(|s| effective_skill_enabled(global, prefs, &s.name))
+            .collect();
+        if !active_skills.is_empty() {
+            let index = active_skills
                 .iter()
                 .map(|s| format!("- **{}**: {}", s.name, s.description))
                 .collect::<Vec<_>>()
@@ -160,6 +437,69 @@ impl ContextStore {
         }
 
         parts.join("\n\n---\n\n")
+    }
+
+    fn build_context_profile(
+        &self,
+        session_id: &str,
+        prefs: &ContextPreferences,
+        global: &crate::workbench_prefs::WorkbenchPrefs,
+    ) -> serde_json::Value {
+        let prompt = self.assemble_system_prompt(None, prefs, global);
+        let agents: Vec<serde_json::Value> = {
+            let mut names: Vec<_> = self.agents.keys().cloned().collect();
+            names.sort();
+            names
+                .into_iter()
+                .map(|name| {
+                    let excerpt = self
+                        .agents
+                        .get(&name)
+                        .map(|a| a.body.lines().next().unwrap_or("").to_string())
+                        .unwrap_or_default();
+                    let enabled = effective_agent_enabled(global, prefs, &name)
+                        && name == prefs.active_agent;
+                    serde_json::json!({
+                        "name": name,
+                        "path": agent_source_path(&name),
+                        "excerpt": excerpt,
+                        "enabled": enabled,
+                    })
+                })
+                .collect()
+        };
+        let rules: Vec<serde_json::Value> = self
+            .rules
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "filename": r.filename,
+                    "path": format!("rules/{}", r.filename),
+                    "excerpt": r.excerpt,
+                    "enabled": effective_rule_enabled(global, prefs, &r.filename),
+                })
+            })
+            .collect();
+        let skills: Vec<serde_json::Value> = self
+            .skills
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "name": s.name,
+                    "path": skill_source_path(&s.name),
+                    "description": s.description,
+                    "enabled": effective_skill_enabled(global, prefs, &s.name),
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "session_id": session_id,
+            "active_agent": prefs.active_agent,
+            "token_estimate": (prompt.len() / 4) as u64,
+            "agents": agents,
+            "rules": rules,
+            "skills": skills,
+        })
     }
 }
 
@@ -220,7 +560,10 @@ pub struct ContextEditorExtension {
 
 impl ContextEditorExtension {
     pub fn new(manifest: ExtensionManifest) -> Self {
-        Self { manifest, store: Arc::new(RwLock::new(ContextStore::default())) }
+        Self {
+            manifest,
+            store: Arc::new(RwLock::new(ContextStore::default())),
+        }
     }
 }
 
@@ -240,7 +583,7 @@ impl Extension for ContextEditorExtension {
             *store.write().unwrap() = loaded;
         }
 
-        self.register_commands(ctx)?;
+        self.register_commands(ctx, root.clone())?;
         self.start_watcher(root, store, runtime);
 
         eprintln!("[context-editor] activated");
@@ -260,8 +603,9 @@ fn resolve_workspace_root() -> PathBuf {
 }
 
 impl ContextEditorExtension {
-    fn register_commands(&self, ctx: &CoreContext) -> Result<(), CoreError> {
+    fn register_commands(&self, ctx: &CoreContext, root: PathBuf) -> Result<(), CoreError> {
         let store = self.store.clone();
+        let cmds = ctx.commands.clone();
 
         // reload
         {
@@ -297,6 +641,7 @@ impl ContextEditorExtension {
         // list-skills
         {
             let s = store.clone();
+            let root = root.clone();
             ctx.commands.register(
                 CommandDecl {
                     id: CommandId {
@@ -311,6 +656,7 @@ impl ContextEditorExtension {
                     permission: Permission::Read,
                 },
                 Arc::new(move |_| {
+                    let global = load_workbench_prefs(&root);
                     let skills = s
                         .read()
                         .unwrap()
@@ -321,6 +667,7 @@ impl ContextEditorExtension {
                                 "name": sk.name,
                                 "description": sk.description,
                                 "triggers": sk.triggers,
+                                "enabled": global.skill_enabled(&sk.name),
                             })
                         })
                         .collect::<Vec<_>>();
@@ -332,6 +679,7 @@ impl ContextEditorExtension {
         // list-agents
         {
             let s = store.clone();
+            let root = root.clone();
             ctx.commands.register(
                 CommandDecl {
                     id: CommandId {
@@ -346,12 +694,18 @@ impl ContextEditorExtension {
                     permission: Permission::Read,
                 },
                 Arc::new(move |_| {
+                    let global = load_workbench_prefs(&root);
                     let agents = s
                         .read()
                         .unwrap()
                         .agents
                         .keys()
-                        .map(|k| serde_json::json!({ "name": k }))
+                        .map(|k| {
+                            serde_json::json!({
+                                "name": k,
+                                "enabled": global.agent_enabled(k),
+                            })
+                        })
                         .collect::<Vec<_>>();
                     Ok(serde_json::json!({ "agents": agents }))
                 }),
@@ -361,6 +715,7 @@ impl ContextEditorExtension {
         // list-rules
         {
             let s = store.clone();
+            let root = root.clone();
             ctx.commands.register(
                 CommandDecl {
                     id: CommandId {
@@ -375,6 +730,7 @@ impl ContextEditorExtension {
                     permission: Permission::Read,
                 },
                 Arc::new(move |_| {
+                    let global = load_workbench_prefs(&root);
                     let rules = s
                         .read()
                         .unwrap()
@@ -384,6 +740,7 @@ impl ContextEditorExtension {
                             serde_json::json!({
                                 "filename": r.filename,
                                 "excerpt": r.excerpt,
+                                "enabled": global.rule_enabled(&r.filename),
                             })
                         })
                         .collect::<Vec<_>>();
@@ -432,9 +789,280 @@ impl ContextEditorExtension {
             )?;
         }
 
+        // load-rule
+        {
+            let s = store.clone();
+            ctx.commands.register(
+                CommandDecl {
+                    id: CommandId {
+                        namespace: "context-editor".into(),
+                        action: "load-rule".into(),
+                        version: 1,
+                    },
+                    owner: "context-editor".into(),
+                    input_schema: r#"{ "filename": "string" }"#.into(),
+                    output_schema: r#"{ "filename": "string", "excerpt": "string", "body": "string" }"#.into(),
+                    callable_by: vec!["panel".into(), "agent".into()],
+                    permission: Permission::Read,
+                },
+                Arc::new(move |input| {
+                    let filename = input["filename"]
+                        .as_str()
+                        .ok_or_else(|| CoreError::Io("load-rule: 'filename' required".into()))?
+                        .to_owned();
+                    let rule = s
+                        .read()
+                        .unwrap()
+                        .rules
+                        .iter()
+                        .find(|r| r.filename == filename)
+                        .map(|r| {
+                            serde_json::json!({
+                                "filename": r.filename,
+                                "excerpt": r.excerpt,
+                                "body": r.body,
+                            })
+                        })
+                        .ok_or_else(|| CoreError::Io(format!("rule '{filename}' not found")))?;
+                    Ok(rule)
+                }),
+            )?;
+        }
+
+        // load-agent
+        {
+            let s = store.clone();
+            ctx.commands.register(
+                CommandDecl {
+                    id: CommandId {
+                        namespace: "context-editor".into(),
+                        action: "load-agent".into(),
+                        version: 1,
+                    },
+                    owner: "context-editor".into(),
+                    input_schema: r#"{ "name": "string" }"#.into(),
+                    output_schema: r#"{ "name": "string", "path": "string", "body": "string" }"#.into(),
+                    callable_by: vec!["panel".into(), "agent".into()],
+                    permission: Permission::Read,
+                },
+                Arc::new(move |input| {
+                    let name = input["name"]
+                        .as_str()
+                        .ok_or_else(|| CoreError::Io("load-agent: 'name' required".into()))?
+                        .to_owned();
+                    let agent = s
+                        .read()
+                        .unwrap()
+                        .agents
+                        .get(&name)
+                        .map(|a| {
+                            serde_json::json!({
+                                "name": name,
+                                "path": agent_source_path(&name),
+                                "body": a.body,
+                            })
+                        })
+                        .ok_or_else(|| CoreError::Io(format!("agent '{name}' not found")))?;
+                    Ok(agent)
+                }),
+            )?;
+        }
+
+        // save-skill
+        {
+            let s = store.clone();
+            let root = root.clone();
+            ctx.commands.register(
+                CommandDecl {
+                    id: CommandId {
+                        namespace: "context-editor".into(),
+                        action: "save-skill".into(),
+                        version: 1,
+                    },
+                    owner: "context-editor".into(),
+                    input_schema: r#"{ "name": "string", "body": "string" }"#.into(),
+                    output_schema: r#"{ "name": "string", "path": "string" }"#.into(),
+                    callable_by: vec!["panel".into()],
+                    permission: Permission::Write,
+                },
+                Arc::new(move |input| {
+                    let name = input["name"]
+                        .as_str()
+                        .ok_or_else(|| CoreError::Io("save-skill: 'name' required".into()))?
+                        .to_owned();
+                    let body = input["body"]
+                        .as_str()
+                        .ok_or_else(|| CoreError::Io("save-skill: 'body' required".into()))?
+                        .to_owned();
+                    let path = write_skill(&root, &name, &body)?;
+                    reload_store(&s);
+                    Ok(serde_json::json!({ "name": name, "path": path }))
+                }),
+            )?;
+        }
+
+        // save-rule
+        {
+            let s = store.clone();
+            let root = root.clone();
+            ctx.commands.register(
+                CommandDecl {
+                    id: CommandId {
+                        namespace: "context-editor".into(),
+                        action: "save-rule".into(),
+                        version: 1,
+                    },
+                    owner: "context-editor".into(),
+                    input_schema: r#"{ "filename": "string", "body": "string" }"#.into(),
+                    output_schema: r#"{ "filename": "string", "path": "string" }"#.into(),
+                    callable_by: vec!["panel".into()],
+                    permission: Permission::Write,
+                },
+                Arc::new(move |input| {
+                    let filename = input["filename"]
+                        .as_str()
+                        .ok_or_else(|| CoreError::Io("save-rule: 'filename' required".into()))?
+                        .to_owned();
+                    let body = input["body"]
+                        .as_str()
+                        .ok_or_else(|| CoreError::Io("save-rule: 'body' required".into()))?
+                        .to_owned();
+                    let path = write_rule(&root, &filename, &body)?;
+                    reload_store(&s);
+                    Ok(serde_json::json!({ "filename": filename, "path": path }))
+                }),
+            )?;
+        }
+
+        // save-agent
+        {
+            let s = store.clone();
+            let root = root.clone();
+            ctx.commands.register(
+                CommandDecl {
+                    id: CommandId {
+                        namespace: "context-editor".into(),
+                        action: "save-agent".into(),
+                        version: 1,
+                    },
+                    owner: "context-editor".into(),
+                    input_schema: r#"{ "name": "string", "body": "string" }"#.into(),
+                    output_schema: r#"{ "name": "string", "path": "string" }"#.into(),
+                    callable_by: vec!["panel".into()],
+                    permission: Permission::Write,
+                },
+                Arc::new(move |input| {
+                    let name = input["name"]
+                        .as_str()
+                        .ok_or_else(|| CoreError::Io("save-agent: 'name' required".into()))?
+                        .to_owned();
+                    let body = input["body"]
+                        .as_str()
+                        .ok_or_else(|| CoreError::Io("save-agent: 'body' required".into()))?
+                        .to_owned();
+                    let path = write_agent(&root, &name, &body)?;
+                    reload_store(&s);
+                    Ok(serde_json::json!({ "name": name, "path": path }))
+                }),
+            )?;
+        }
+
+        // context-profile
+        {
+            let s = store.clone();
+            let root = root.clone();
+            let cmds = cmds.clone();
+            ctx.commands.register(
+                CommandDecl {
+                    id: CommandId {
+                        namespace: "context-editor".into(),
+                        action: "context-profile".into(),
+                        version: 1,
+                    },
+                    owner: "context-editor".into(),
+                    input_schema: r#"{ "session_id": "string?" }"#.into(),
+                    output_schema: r#"{ "session_id": "string", "active_agent": "string", "token_estimate": "number", "agents": "array", "rules": "array", "skills": "array" }"#.into(),
+                    callable_by: vec!["panel".into(), "agent".into()],
+                    permission: Permission::Read,
+                },
+                Arc::new(move |input| {
+                    let session_id = resolve_session_id(&cmds, &input)?;
+                    let prefs = load_session_preferences(&root, &session_id);
+                    let global = load_workbench_prefs(&root);
+                    let store = s.read().unwrap();
+                    Ok(store.build_context_profile(&session_id, &prefs, &global))
+                }),
+            )?;
+        }
+
+        // set-context-profile
+        {
+            let s = store.clone();
+            let root = root.clone();
+            let cmds = cmds.clone();
+            ctx.commands.register(
+                CommandDecl {
+                    id: CommandId {
+                        namespace: "context-editor".into(),
+                        action: "set-context-profile".into(),
+                        version: 1,
+                    },
+                    owner: "context-editor".into(),
+                    input_schema: r#"{ "session_id": "string?", "active_agent": "string?", "agent": { "name": "string", "enabled": "boolean" }?, "rule": { "filename": "string", "enabled": "boolean" }?, "skill": { "name": "string", "enabled": "boolean" }? }"#.into(),
+                    output_schema: r#"{ "session_id": "string", "active_agent": "string", "token_estimate": "number", "agents": "array", "rules": "array", "skills": "array" }"#.into(),
+                    callable_by: vec!["panel".into()],
+                    permission: Permission::Write,
+                },
+                Arc::new(move |input| {
+                    let session_id = resolve_session_id(&cmds, &input)?;
+                    let mut prefs = load_session_preferences(&root, &session_id);
+                    if let Some(agent) = input.get("active_agent").and_then(|v| v.as_str()) {
+                        let store = s.read().unwrap();
+                        if store.agents.contains_key(agent) {
+                            prefs.active_agent = agent.to_owned();
+                            prefs.disabled_agents.retain(|n| n != agent);
+                        }
+                    }
+                    if let Some(agent) = input.get("agent") {
+                        if let (Some(name), Some(enabled)) = (
+                            agent.get("name").and_then(|v| v.as_str()),
+                            agent.get("enabled").and_then(|v| v.as_bool()),
+                        ) {
+                            let store = s.read().unwrap();
+                            if store.agents.contains_key(name) {
+                                prefs.set_agent_enabled(name, enabled);
+                            }
+                        }
+                    }
+                    if let Some(rule) = input.get("rule") {
+                        if let (Some(filename), Some(enabled)) = (
+                            rule.get("filename").and_then(|v| v.as_str()),
+                            rule.get("enabled").and_then(|v| v.as_bool()),
+                        ) {
+                            prefs.set_rule_enabled(filename, enabled);
+                        }
+                    }
+                    if let Some(skill) = input.get("skill") {
+                        if let (Some(name), Some(enabled)) = (
+                            skill.get("name").and_then(|v| v.as_str()),
+                            skill.get("enabled").and_then(|v| v.as_bool()),
+                        ) {
+                            prefs.set_skill_enabled(name, enabled);
+                        }
+                    }
+                    save_session_preferences(&root, &session_id, &prefs)?;
+                    let global = load_workbench_prefs(&root);
+                    let store = s.read().unwrap();
+                    Ok(store.build_context_profile(&session_id, &prefs, &global))
+                }),
+            )?;
+        }
+
         // system-prompt
         {
             let s = store.clone();
+            let root = root.clone();
+            let cmds = cmds.clone();
             ctx.commands.register(
                 CommandDecl {
                     id: CommandId {
@@ -443,14 +1071,19 @@ impl ContextEditorExtension {
                         version: 1,
                     },
                     owner: "context-editor".into(),
-                    input_schema: r#"{ "agent": "string?" }"#.into(),
+                    input_schema: r#"{ "session_id": "string?", "agent": "string?" }"#.into(),
                     output_schema: r#"{ "prompt": "string", "token_estimate": "number" }"#.into(),
                     callable_by: vec!["panel".into(), "agent".into(), "service".into()],
                     permission: Permission::Read,
                 },
                 Arc::new(move |input| {
+                    let session_id = resolve_session_id(&cmds, &input)?;
+                    let prefs = load_session_preferences(&root, &session_id);
                     let agent = input["agent"].as_str().map(str::to_owned);
-                    let prompt = s.read().unwrap().assemble_system_prompt(agent.as_deref());
+                    let global = load_workbench_prefs(&root);
+                    let store = s.read().unwrap();
+                    let prompt =
+                        store.assemble_system_prompt(agent.as_deref(), &prefs, &global);
                     let token_estimate = (prompt.len() / 4) as u64;
                     Ok(serde_json::json!({ "prompt": prompt, "token_estimate": token_estimate }))
                 }),
@@ -625,7 +1258,8 @@ This is the body.
         .unwrap();
 
         let store = ContextStore::load_from(&root);
-        let prompt = store.assemble_system_prompt(None);
+        let global = crate::workbench_prefs::WorkbenchPrefs::default();
+        let prompt = store.assemble_system_prompt(None, &ContextPreferences::default(), &global);
         let agent_pos = prompt.find("You are Nulqor.").unwrap();
         let rule_pos = prompt.find("Always be helpful.").unwrap();
         let skill_pos = prompt.find("test-skill").unwrap();
@@ -652,9 +1286,68 @@ This is the body.
         .unwrap();
 
         let store = ContextStore::load_from(&root);
-        let prompt = store.assemble_system_prompt(None);
+        let global = crate::workbench_prefs::WorkbenchPrefs::default();
+        let prompt = store.assemble_system_prompt(None, &ContextPreferences::default(), &global);
         assert!(!prompt.contains("{{current_datetime}}"));
         assert!(prompt.contains("Current date and time:"));
+    }
+
+    #[test]
+    fn system_prompt_respects_disabled_rules_and_skills() {
+        let root = tmp_workspace();
+        fs::write(root.join("AGENTS.md"), "You are Nulqor.").unwrap();
+        fs::create_dir_all(root.join("rules")).unwrap();
+        fs::write(root.join("rules/a.md"), "Rule A").unwrap();
+        fs::write(root.join("rules/b.md"), "Rule B").unwrap();
+        fs::create_dir_all(root.join("skills/s1")).unwrap();
+        fs::write(
+            root.join("skills/s1/SKILL.md"),
+            "---\nname: s1\ndescription: one\ntriggers: []\n---\n\nBody.",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("skills/s2")).unwrap();
+        fs::write(
+            root.join("skills/s2/SKILL.md"),
+            "---\nname: s2\ndescription: two\ntriggers: []\n---\n\nBody.",
+        )
+        .unwrap();
+
+        let store = ContextStore::load_from(&root);
+        let mut prefs = ContextPreferences::default();
+        prefs.set_rule_enabled("a.md", false);
+        prefs.set_skill_enabled("s2", false);
+        let global = crate::workbench_prefs::WorkbenchPrefs::default();
+        let prompt = store.assemble_system_prompt(None, &prefs, &global);
+        assert!(!prompt.contains("Rule A"));
+        assert!(prompt.contains("Rule B"));
+        assert!(prompt.contains("s1"));
+        assert!(!prompt.contains("s2"));
+    }
+
+    #[test]
+    fn system_prompt_respects_disabled_agent() {
+        let root = tmp_workspace();
+        fs::write(root.join("AGENTS.md"), "You are Nulqor.").unwrap();
+        fs::create_dir_all(root.join("agents")).unwrap();
+        fs::write(root.join("agents/reviewer.md"), "You are a reviewer.").unwrap();
+
+        let store = ContextStore::load_from(&root);
+        let mut prefs = ContextPreferences::default();
+        prefs.set_agent_enabled("default", false);
+        let global = crate::workbench_prefs::WorkbenchPrefs::default();
+        let prompt = store.assemble_system_prompt(None, &prefs, &global);
+        assert!(!prompt.contains("You are Nulqor."));
+    }
+
+    #[test]
+    fn session_preferences_roundtrip() {
+        let root = tmp_workspace();
+        std::fs::create_dir_all(root.join(".nulqor/sessions")).unwrap();
+        let mut prefs = ContextPreferences::default();
+        prefs.set_rule_enabled("a.md", false);
+        save_session_preferences(&root, "2026-05-24-test", &prefs).unwrap();
+        let loaded = load_session_preferences(&root, "2026-05-24-test");
+        assert!(!loaded.rule_enabled("a.md"));
     }
 
     #[test]
@@ -669,6 +1362,13 @@ This is the body.
         assert!(cmds.iter().any(|c| c == "context-editor:list-agents@1"));
         assert!(cmds.iter().any(|c| c == "context-editor:list-rules@1"));
         assert!(cmds.iter().any(|c| c == "context-editor:load-skill@1"));
+        assert!(cmds.iter().any(|c| c == "context-editor:load-rule@1"));
+        assert!(cmds.iter().any(|c| c == "context-editor:load-agent@1"));
+        assert!(cmds.iter().any(|c| c == "context-editor:save-skill@1"));
+        assert!(cmds.iter().any(|c| c == "context-editor:save-rule@1"));
+        assert!(cmds.iter().any(|c| c == "context-editor:save-agent@1"));
+        assert!(cmds.iter().any(|c| c == "context-editor:context-profile@1"));
+        assert!(cmds.iter().any(|c| c == "context-editor:set-context-profile@1"));
         assert!(cmds.iter().any(|c| c == "context-editor:system-prompt@1"));
     }
 }

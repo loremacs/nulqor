@@ -14,13 +14,18 @@
       {
         "label": "main",
         "title": "Nulqor",
-        "fullscreen": true,
+        "fullscreen": false,
+        "width": 1,
+        "height": 1,
+        "x": -10000,
+        "y": -10000,
+        "center": false,
         "transparent": true,
         "decorations": false,
-        "resizable": false,
+        "resizable": true,
         "alwaysOnTop": false,
         "visible": false,
-        "backgroundColor": "#000000"
+        "backgroundColor": "#00000000"
       }
     ],
     "security": {

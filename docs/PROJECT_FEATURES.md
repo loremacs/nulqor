@@ -73,7 +73,21 @@ Canonical record of every shipped feature. Each entry provides enough implementa
 **Files:** `nulqor.toml`, `src-tauri/src/startup_config.rs`, `extensions/host/ui/`
 **Purpose:** Root config selects enabled extensions and initial open panels; host shell is always the window UI.
 **Keys:** `open_panels`, `enabled_extensions`, `[shell]` (`cell_pixels`, `cell_step`, `snap_enabled`, `show_grid`, `click_through`, `always_on_top`).
-**Shell:** Transparent fullscreen window; menu bar (Settings, **Layout**, Apps) + panel tiles are interactive. Click-through on empty canvas via `setIgnoreCursorEvents` polling (`click-through.ts`) — only `.panel-tile` (not grid/sub-grid backgrounds) blocks passthrough.
+**Shell — two display modes** (`windowFrame.mode`, `data-window-mode` on `.nulqor-shell`, `applyWindowModePolicy` in `shell.ts`):
+
+| Mode           | Background                                               | Click-through                                                                                                                          | Settings UI                                                                                                                               |
+| -------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| **Fullscreen** | Transparent overlay (`click_through` from `nulqor.toml`) | Optional — `setIgnoreCursorEvents` polling in `click-through.ts`; interactive hit targets: menu bar, panels, dropdowns, sashes, modals | **Click Through Desktop** toggle active                                                                                                   |
+| **Windowed**   | Opaque `#121216` on shell, canvas, `html`/`body`/`#app`  | **Always off** — `clickThrough.setEnabled(false)` + `forceClickable()`; pass-through never runs when `data-window-mode="windowed"`     | Toggle **disabled** (VS Code style): grey `#858585` text, `cursor: default`, inline hint **(fullscreen only)**; click row → red top toast |
+
+**Click-through rules** (`click-through.ts`): Only active when `enabled && !windowed && windowFocused`. On blur or windowed mode: stop poll, `setIgnoreCursorEvents(false)`. `refresh()` must not enable pass-through when disabled (fixes stuck OS pass-through after alt-tab). Empty canvas uses CSS `pointer-events: none` in fullscreen; windowed mode uses `pointer-events: auto` on shell/canvas so the window receives clicks normally.
+
+**Window mode transitions:** Restore down / double-click menu bar → windowed policy + red alert toast top: _"Windowed mode — click-through disabled."_ (4s). Fullscreen → restore saved `shell.click_through` preference (not persisted as off).
+
+**Window frame persistence** (`window-frame.ts`, `window-snap.ts`, `window-resize.ts`, `localStorage` key `nulqor-shell-v8` → `windowFrame`): Saves `mode`, logical `width`/`height`, physical outer `x`/`y`, optional **`anchor`** (`free` | `left` | `right` | … | `maximize`), and **`monitorName`**. Snap detection compares outer bounds to the monitor work area with ratio + pixel tolerance (Windows shadow/inset). Move/resize saves are debounced 180ms so Aero Snap finishes before capture. On restore, anchor geometry is applied from the saved (or current) monitor work area using saved inner size + snap position. **`window-frame.json`** in app local data is synced on capture/close; **Rust `setup` applies it before the webview paints** while the window is still hidden (`tauri.conf.json` creates a 1×1 off-screen window — not fullscreen/800×600 — to avoid the Windows “restore down” flash). Frontend startup only verifies geometry (fallback if disk file missing), paints the shell while hidden, then calls `show()` once. UI stays in `nulqor-startup-hidden` until then.
+
+**Shell toasts** (`showShellToast` in `shell.ts`, appended to `document.body`): `placement: top | bottom`, `tone: default | alert`. Alert = red banner under menu bar for mode/preference violations.
+
 **Canvas layout (decision 007):** All layout logic in host UI — **Grid mode** (tile desk) vs **Layout mode** (split tree + presets). Up to **5 saved profiles** in `localStorage` (`nulqor-shell-v8`). **Edit canvas** suspends click-through; split edit bar supports split/merge/sub-grid per slot. Sub-grid slots (`#`) **stay enabled when empty** until `#` is toggled off — panels can be dragged out and back in. Panels drag between sub-grid slots and simple slots via `movePanelToLeaf` + geometric `leafIdAtPoint`. Grid↔Layout mode uses `syncGridLayoutsFromSplitTree` / `syncSplitTreeFromGridLayouts` + `reconcileSplitTreeWithOpenPanels`. **Cell size changes** preserve panel pixel size via `pixelLock` (grid mode locks from DOM; sub-grids via `lockTilePixels`); panels re-snap on next drag, then resize normally.
 **Layout modules:** `split-layout.ts`, `split-render.ts`, `canvas-profiles.ts`, `grid.ts`, `shell.ts`.
 **Commands:** `canvas:config@1` returns startup shell config + discovered Panel extensions.
@@ -127,11 +141,12 @@ Canonical record of every shipped feature. Each entry provides enough implementa
 ### 1.8 IPC bridge (`ipc.rs`)
 
 **Purpose:** Routes Tauri `invoke` calls to command registry. Exposes scoped event bus to frontend.
-**Tauri commands:** `core_invoke(namespace, action, version, input)`, `core_list_commands()`.
+**Tauri commands:** `core_invoke(id, input)` runs handlers on a blocking thread pool (UI stays responsive during long model loads), `core_list_commands()`.
 
 ### 1.9 Host extension (`extensions/host/`)
 
-**Purpose:** Transparent canvas shell — grid/split layout engines, draggable menu bar (Settings / Layout / Apps), panel tiles. Emits `canvas:ready@1` via core after load.
+**Purpose:** Canvas shell — fullscreen overlay or windowed app; grid/split layout engines, draggable menu bar (Settings / Layout / Apps), panel tiles. Emits `canvas:ready@1` via core after load.
+**Window chrome:** `window-chrome/windows.ts` — restore/fullscreen toggle, title-bar drag; `onWindowModeChanged` → `applyWindowModePolicy`. See §0.7 for fullscreen vs windowed UI rules.
 **Commands:** `canvas:status@1`, `canvas:config@1`.
 **UI:** `extensions/host/ui/` — always loaded from root `index.html`.
 **Layout menu:** Saved profiles (5 slots), Grid vs Layout mode, split presets (Single, 2/3 col, 2/3 row, 2×2, Main+Side), Edit canvas, Save current as, grid cell/snap options — **all sections always visible** regardless of mode. Section labels use `.menu-dropdown-section-header` (uppercase accent); empty profile slots use `.menu-dropdown-row-empty` (italic muted). **Save current as…** opens centered modal `promptSaveLayout` in `save-layout-dialog.ts`: pick any of 5 slots (overwrite existing or empty), edit name, with overwrite warning; preserves profile `id` when replacing a slot. **Split profile capture** stores full split tree (panel slot assignments, sub-grid `#` tiles with `pixelLock`, sash ratios) plus `SplitShellSnapshot`; `openPanelIds` derived from tree via `allPanelIdsInTree`. Before save, `syncSplitTreeFromDom` reads live DOM (simple-slot `panelId`, sub-grid tile bounds, sash ratios). **Split profile load** uses `applyProfileToSplit` + `pruneSplitTreeToOpenPanels` (no `fillEmptyLeaves` reassignment) and `syncGlobalPanelLayoutsFromSplitTree`; sub-grids restore `pixelLock` positions without re-clamping. `onPersistSplit` and failed cross-slot moves call `syncSplitTreeFromDom` so sub-grid `#` handlers (stale closures after clone) do not lose other panels' positions when one panel is moved. **Grid profile load** applies saved `cell_pixels` / snap settings then calls `refreshGrid()` before `syncTilesFromLayouts()` so `--cell-size` and tile placement match the saved profile (clears stale `pixelLock` when snap is on). **Split layout** section: **Snap Layout Lines** (`shell.sash_snap_enabled`) snaps sash dividers to other same-orientation dividers on release (12px threshold). While dragging near a target, a ghosted accent line (`.sash-snap-preview`) spans the canvas at the snap position. Sash drag syncs ratios from DOM on grab (fixes jump) and uses absolute boundary math accounting for 6px sash width (`SASH_THICKNESS_PX`). Profile apply/save dedupes panel ids (`dedupePanelAssignmentsInTree`, `dedupeOpenPanelIds`); render ignores stale async passes via `renderGeneration`.
@@ -145,13 +160,41 @@ Canonical record of every shipped feature. Each entry provides enough implementa
 
 ## Phase 2 — First AI Harness
 
-### 2.1 Provider extension (`extensions/provider-lmstudio/`)
+### 2.1 Provider routing (`extensions/provider-router/` + backends)
 
-**Files:** `extension.toml`, `src/lib.rs`
-**Purpose:** Slotted `provider` capability, instance `lmstudio`. Connects to LM Studio, fetches model list from `GET /v1/models`, streams via Chat Completions API. Single-flight request queue (only one generation at a time).
-**Commands:** `provider:connect@1({ url })`, `provider:models@1()`, `provider:generate@1({ messages, system_prompt, stream_id?, model? })`.
+**Config:** `nulqor.toml` → `active_provider = "lmstudio" | "ollama" | "llamacpp"`. Restart required to change default; chat panel can switch at runtime via `provider:set-active@1`.
+
+**Router (`extensions/provider-router/`):** Registers public `provider:*@1` and forwards to `{active}:{action}@1`. Also `provider:info@1` (catalog + VRAM hints) and `provider:set-active@1({ provider })`.
+
+**Shared helpers:** `extensions/provider-common/src/lib.rs` — OpenAI ping/models, SSE streaming, system-prompt assembly, `model_ids_match()` for catalog vs native id matching, `loaded_entry()` shape for `loaded-models@1`.
+
+| Backend          | Extension           | Default URL              | 8 GB VRAM notes                                                       |
+| ---------------- | ------------------- | ------------------------ | --------------------------------------------------------------------- |
+| LM Studio        | `provider-lmstudio` | `http://localhost:1234`  | 7–8B Q4/Q5; load/unload via native API                                |
+| Ollama           | `provider-ollama`   | `http://localhost:11434` | `llama3.2:3b`, `phi3:mini`, `gemma2:2b`, `qwen2.5:7b-instruct-q4_K_M` |
+| llama.cpp server | `provider-llamacpp` | `http://localhost:8080`  | Start server with one GGUF Q4_K_M model                               |
+
+**Backend commands:** `lmstudio:*@1`, `ollama:*@1`, `llamacpp:*@1` (connect, disconnect, models, select-model, stop-model, generate). Stream events stay on `provider:stream-*@1`.
+
+### 2.1a LM Studio backend (`extensions/provider-lmstudio/`)
+
+**Files:** `extension.toml`, `src/lib.rs`, `README.md`
+**Purpose:** Slotted `provider` capability, instance `lmstudio`. LM Studio: connect, fetch models, load/stop owned models, stream via Chat Completions API. Single-flight request queue (only one generation at a time).
+**Commands:** `lmstudio:connect@1({ url, model })`, `lmstudio:models@1({ refresh?, url? })`, `lmstudio:select-model@1({ model })`, `lmstudio:stop-model@1()`, `lmstudio:generate@1(...)`.
+**Key constraints:** URL must be localhost. Model id fetched from LM Studio — never hardcoded.
+**Responsiveness:** `models@1` returns cached model list immediately when `refresh` is omitted or false (no HTTP). Live probe uses `http_probe` (5s timeout, 2s connect) only on `refresh: true` while connected. Streaming generation uses separate `http_generate` (120s). Disconnect clears cache and active model.
+**Model workflow:** **Fetch models** lists catalog (`models@1 { refresh, url }`). **Connect** loads the chosen model (`connect@1 { url, model }`). **Stop** / **Disconnect** unload only Nulqor-tracked instances. **Loaded in VRAM** (`loaded-models@1`) badges `nulqor_owned` from in-memory `nulqor_loaded` — every Nulqor connect/select/load registers `{ model, instance_id }`; matching uses `model_ids_match` so catalog ids align with LM Studio `selected_variant` / instance ids.
 **Events emitted:** `provider:stream-start@1`, `provider:stream-delta@1 { delta }`, `provider:stream-done@1 { content, reasoning, tokens, model }`, `provider:stream-error@1`.
-**Key constraints:** URL must be localhost. Model id fetched from `/v1/models` — never hardcoded.
+
+### 2.1b Ollama backend (`extensions/provider-ollama/`)
+
+**Files:** `extension.toml`, `src/lib.rs`, `README.md`
+**Purpose:** Ollama OpenAI `/v1` + native `/api/tags` catalog. Warm model on connect (`keep_alive: 5m`); stop unloads with `keep_alive: 0` when Nulqor warmed it. `nulqor_warmed` tracks models loaded/selected via Nulqor; `loaded-models@1` uses `model_ids_match` (e.g. `llama3.2` vs `llama3.2:latest`).
+
+### 2.1c llama.cpp server backend (`extensions/provider-llamacpp/`)
+
+**Files:** `extension.toml`, `src/lib.rs`, `README.md`
+**Purpose:** OpenAI-compatible server. Model loaded at server start; stop/disconnect clears selection only (no VRAM unload).
 
 ### 2.2 Transcript extension (`extensions/transcript/`)
 
@@ -165,35 +208,68 @@ Canonical record of every shipped feature. Each entry provides enough implementa
 
 **Files:** `extension.toml`, `src/lib.rs`
 **Purpose:** axum HTTP server (port 8080) + WebSocket. Exact endpoint surface from decisions/006 §1–3.
-**Endpoints:** `GET /health`, `POST /connect`, `GET /models`, `POST /message`, `POST /observers/register`, `GET /observers/catch-up`, `POST /observers/ack`, `GET /observers`, `GET /transcript`, `GET /ws/transcript`, `GET /ws/chat`.
+**Endpoints:** `GET /health`, `POST /connect`, `GET /models?refresh=true`, `POST /select-model`, `POST /stop-model`, `POST /message`, `POST /observers/register`, `GET /observers/catch-up`, `POST /observers/ack`, `GET /observers`, `GET /transcript`, `GET /ws/transcript`, `GET /ws/chat`.
 **Observer protocol:** First `catch_up` returns full backlog. Subsequent calls return only new turns. Duplicate observer name is idempotent. Unregistered observer on `/message` → 400.
 
 ### 2.4 Chat UI panel (`extensions/chat-panel/`)
 
 **Files:** `extension.toml`, `src/lib.rs`, `ui/panel.ts`, `ui/style.css`. Registered in `extensions/host/ui/panels.ts` as a canvas tile.
-**Purpose:** Active-branch chat + human-only conversation map (rail) + archived fork overlay. Session picker, LM Studio connection bar, reasoning blocks, harness token budget.
+**Purpose:** Active-branch chat + human-only conversation map (rail) + archived fork overlay. Session picker, provider connection bar (LM Studio / Ollama / llama.cpp), reasoning blocks, harness token budget.
 **Key behaviour:**
+
+- Left **Chats** sidebar: `sessions:list@1` — click row to switch session; **New** creates session; gear opens **Chat settings** modal (name/description via `sessions:update@1` + agent context toggles via `context-editor`); trash opens styled delete confirm then `sessions:delete@1`; **Hide chats** toggle persists via `localStorage` (`nulqor.chat-panel.sessions-visible`).
 - Main pane: `transcript:get@1` (active branch only — no fork UI inline).
-- Left rail: `human-rail:list@1` — click row to jump (`message_id` scroll); fork rows open `human-branch:open@1` overlay.
+- Right rail: `human-rail:list@1` — click row to jump (`message_id` scroll); fork rows open `human-branch:open@1` overlay. **Hide map** toggle persists via `localStorage` (`nulqor.chat-panel.map-visible`).
 - Sessions: `sessions:list@1`, `sessions:create@1`, `sessions:load@1`.
 - Edit user message: `sessions:edit-message@1` — archives prior branch to `.nulqor/human/branches/` when replies exist; optional regenerate.
 - Bookmarks: `human-rail:add-marker@1` via Mark dropdown or Shift+click message.
-- Requires `session-store`, `transcript`, `provider-lmstudio`, `http-api`.
+- Provider bar: **center** pixel alien icon opens config overlay (provider, URL, fetch, model, load/eject) · top bar **Connect/Disconnect** + status on the left.
+- **Empty transcript:** minimal hint only (connect model, send a message).
+- **Chat settings:** gear on each chat row (and auto-opens on **New chat**) — name/description via `sessions:update@1`; agent context toggles per session (`context-editor:context-profile@1` / `set-context-profile@1` with `session_id`); prefs stored in `.nulqor/sessions/<id>.context.json`; full text via **Read persona/rule/skill** (`load-agent@1`, `load-rule@1`, `load-skill@1`). No top-bar Context button.
+- **New chat:** `sessions:create@1` with title `"New chat"` (no browser prompt).
+- Transcript scroll: `#transcript` is the scroll container (host tile body uses `overflow: hidden`). Panel mount and session switch force scroll-to-bottom after load; ongoing updates stick when pinned at bottom.
+- Requires `session-store`, `transcript`, `provider-router`, `http-api`, `context-editor`.
 
 ### 2.4b Session store (`extensions/session-store/`)
 
 **Files:** `extension.toml`, `src/lib.rs`, `README.md`
 **Purpose:** File-backed sessions with agent/human path split. Agent contract: `.nulqor/sessions/<id>.jsonl` only. Human-only: `.nulqor/human/` (catalog, rails, branches).
-**Commands:** `sessions:list@1`, `sessions:create@1`, `sessions:load@1`, `sessions:active@1`, `sessions:edit-message@1`, `human-rail:list@1`, `human-rail:add-marker@1`, `human-branch:list@1`, `human-branch:open@1`.
+**Session file:** `.nulqor/sessions/<id>.jsonl` — created on extension startup (`ensure_active_session`), on `sessions:create@1`, and repaired on `sessions:list@1` if the catalog entry exists without a file. First message also creates the file via append if missing.
+**Commands:** `sessions:list@1`, `sessions:create@1`, `sessions:load@1`, `sessions:update@1({ session_id, title?, summary? })`, `sessions:delete@1({ session_id })`, `sessions:active@1`, `sessions:edit-message@1`, `human-rail:list@1`, `human-rail:add-marker@1`, `human-branch:list@1`, `human-branch:open@1`.
 **Events subscribed:** `transcript:message-added@1` (append + auto rail marker), `transcript:hydrated@1` (rewrite session file).
 **Transcript integration:** `transcript:hydrate@1` (service-only) replaces in-memory messages on load/edit/session switch.
+**Design spec (draft):** [`docs/decisions/009-sessions-file-store.draft.md`](../decisions/009-sessions-file-store.draft.md) — thread vs room mode, rail, forks, agent boundaries, and unimplemented ideas for future sessions.
 
 ### 2.5 Context editor extension (`extensions/context-editor/`)
 
 **Files:** `extension.toml`, `src/lib.rs`
 **Purpose:** Loads skills (`skills/<name>/SKILL.md` YAML frontmatter; falls back to `skill.md`), agents (`AGENTS.md`, `agents/<n>.md`), rules (`rules/*.{md,mdc,txt}`, alphabetical). Assembles system prompt in order: persona → rules → skill index. Hot-reloads on file change via `notify` watcher. Interpolates `{{current_date}}` and `{{current_datetime}}` in all text at assembly time.
-**Commands:** `context-editor:reload@1()`, `context-editor:list-skills@1()`, `context-editor:list-agents@1()`, `context-editor:list-rules@1()`, `context-editor:load-skill@1({ name })`, `context-editor:system-prompt@1({ agent? })`.
+**Commands:** `context-editor:reload@1()`, `context-editor:list-skills@1()`, `context-editor:list-agents@1()`, `context-editor:list-rules@1()`, `context-editor:load-skill@1({ name })`, `context-editor:load-rule@1({ filename })`, `context-editor:load-agent@1({ name })`, `context-editor:save-skill@1({ name, body })`, `context-editor:save-rule@1({ filename, body })`, `context-editor:save-agent@1({ name, body })`, `context-editor:context-profile@1({ session_id? })`, `context-editor:set-context-profile@1({ session_id?, active_agent?, agent?, rule?, skill? })`, `context-editor:system-prompt@1({ session_id?, agent? })`.
+**FS scopes:** `.nulqor/`, `AGENTS.md`, `agents/`, `rules/`, `skills/` (manifest declaration; writes use direct `std::fs` with path validation).
+**Save behaviour:** `save-*@1` writes disk, then hot-reloads in-memory store. Skill names and non-default agent names must be kebab-case. Rules reject `INDEX.*` and path separators.
+**Preferences:** `.nulqor/sessions/<id>.context.json` per chat — active persona, disabled agents/rules/skills; legacy `.nulqor/context-preferences.json` migrated on first read. `system-prompt@1` resolves `session_id` from input or active session.
 **CWD note:** In dev mode cargo sets CWD to `src-tauri/`. `resolve_workspace_root()` walks up to the workspace root automatically.
+
+### 2.5a Registry extension (`extensions/registry/`)
+
+**Files:** `extension.toml`, `src/lib.rs`
+**Purpose:** Read-only introspection for the workbench — scans `extensions/*/extension.toml`, reads `nulqor.toml` enabled set, exposes dependency graph and runtime command catalog.
+**Commands:** `extensions:list@1() → { extensions[] }` (`in_profile`, `enabled`, `protected`), `extensions:graph@1() → { nodes[], edges[] }`, `commands:catalog@1() → { commands[] }` (includes `enabled` per owner), `workbench:prefs@1`, `workbench:set-enabled@1({ kind, id, enabled })`, `workbench:reset@1`.
+**Prefs file:** `.nulqor/workbench-prefs.json` — global disabled lists for extensions/skills/rules/agents. `host` and `registry` cannot be disabled.
+**Runtime:** Disabled extension owners are blocked at `CommandRegistry::invoke`. Context-editor merges global prefs with per-session chat toggles (global disable wins).
+**Reset:** Host **Settings → Reset Workbench toggles** calls `workbench:reset@1` (tooltip explains scope).
+
+### 2.5b Workbench panel (`extensions/workbench/`)
+
+**Files:** `extension.toml`, `src/lib.rs`, `ui/panel.ts`, `ui/style.css`
+**Purpose:** Inspect everything that makes Nulqor run — extensions, commands, skills, rules, agents.
+**UI tabs:** Extensions, Commands, Skills, Rules, Agents — each list row has an enable checkbox (except protected core extensions).
+**Rules tab:** Hides `rules/index.md` (registry index only; not a prompt rule).
+**Commands tab:** Command cards grey out when owner extension is disabled.
+**Disabled items:** Excluded from system prompt; extension commands fail at invoke; editors are read-only until re-enabled.
+**Skill form:** Parses/rebuilds YAML frontmatter + sections Metadata, When to use, Contract, Steps, Verification per `skills/create-skill/references/skill-format.md`.
+**Save:** Skills/rules/agents call `context-editor:save-*@1` then `reload@1`. Extensions/commands are read-only.
+**Host registration:** `extensions/host/ui/panels.ts` → `workbench` loader. Open from Apps menu (`enabled_extensions` must include `workbench`).
 
 ### 2.6 MCP bridge extension (`extensions/mcp-bridge/`)
 

@@ -20,6 +20,10 @@ export const PANEL_REGISTRY: Record<string, PanelEntry> = {
     load: () => import("../../chat-panel/ui/panel.ts"),
     resizable: true,
   },
+  workbench: {
+    load: () => import("../../workbench/ui/panel.ts"),
+    resizable: true,
+  },
 };
 
 export async function mountPanel(

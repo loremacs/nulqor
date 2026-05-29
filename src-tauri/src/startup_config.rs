@@ -10,6 +10,7 @@ pub struct StartupConfig {
     pub open_panels: Vec<String>,
     pub shell: ShellConfig,
     pub enabled_extensions: Option<HashSet<String>>,
+    pub active_provider: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +44,7 @@ struct StartupToml {
     open_panels: Option<Vec<String>>,
     entry_panel: Option<String>,
     enabled_extensions: Option<Vec<String>>,
+    active_provider: Option<String>,
     shell: Option<ShellToml>,
 }
 
@@ -85,6 +87,7 @@ impl Default for StartupConfig {
             open_panels: vec!["hello-world".into()],
             shell: ShellConfig::default(),
             enabled_extensions: None,
+            active_provider: "lmstudio".into(),
         }
     }
 }
@@ -119,16 +122,19 @@ pub fn load_startup_config(root: &Path) -> StartupConfig {
                 .or_else(|| parsed.entry_panel.map(|id| vec![id]))
                 .unwrap_or_else(|| vec!["hello-world".into()]);
             let shell = parse_shell(parsed.shell);
+            let active_provider = parsed
+                .active_provider
+                .unwrap_or_else(|| "lmstudio".into());
             if let Some(ref set) = enabled {
                 eprintln!(
-                    "[CONFIG] nulqor.toml: open_panels={:?}, cell_pixels={}, enabled={} extensions",
+                    "[CONFIG] nulqor.toml: open_panels={:?}, active_provider={active_provider}, cell_pixels={}, enabled={} extensions",
                     open_panels,
                     shell.cell_pixels,
                     set.len()
                 );
             } else {
                 eprintln!(
-                    "[CONFIG] nulqor.toml: open_panels={open_panels:?}, cell_pixels={}",
+                    "[CONFIG] nulqor.toml: open_panels={open_panels:?}, active_provider={active_provider}, cell_pixels={}",
                     shell.cell_pixels
                 );
             }
@@ -136,6 +142,7 @@ pub fn load_startup_config(root: &Path) -> StartupConfig {
                 open_panels,
                 shell,
                 enabled_extensions: enabled,
+                active_provider,
             }
         }
         Err(e) => {
@@ -199,6 +206,7 @@ pub fn canvas_config_json(
             .enabled_extensions
             .as_ref()
             .map(|set| set.iter().cloned().collect::<Vec<_>>()),
+        "active_provider": startup.active_provider,
     })
 }
 

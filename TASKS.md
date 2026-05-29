@@ -67,13 +67,15 @@ Active task queue. Read before starting non-trivial work. Full phase specs in `d
 
 ## Phase 4 — Persistence & harness essentials
 
-| # | Task | Status |
-|---|---|---|
-| 4.1 | Persistence extension — SQLite + FTS5 | ⬜ Pending |
-| 4.2 | Project save/load — `.nulqor` files | ⬜ Pending |
-| 4.3 | Agent-loop extension — plan→act→observe→verify | ⬜ Pending |
-| 4.4 | Context manager — token budget + compaction | ⬜ Pending |
-| 4.5 | Decision records workflow — `docs/decisions/<NNN>.md` command | ⬜ Pending |
+**Sessions v1 (partial):** `session-store` + `chat-panel` file persistence shipped ahead of Phase 4. Read [`docs/decisions/009-sessions-file-store.draft.md`](docs/decisions/009-sessions-file-store.draft.md) before continuing; SQLite/FTS remains indexer-only (not a second truth store).
+
+| # | Task | Status | Notes |
+|---|---|---|---|
+| 4.1 | Persistence extension — SQLite + FTS5 | ⬜ Pending | Index over `.nulqor/` files; see decision 009 |
+| 4.2 | Project save/load — `.nulqor` files | 🟡 Partial | v1: `sessions/*.jsonl` + `human/**`; room mode, search, CLI parity in BACKLOG |
+| 4.3 | Agent-loop extension — plan→act→observe→verify | ⬜ Pending | |
+| 4.4 | Context manager — token budget + compaction | ⬜ Pending | |
+| 4.5 | Decision records workflow — `docs/decisions/<NNN>.md` command | ⬜ Pending | |
 
 ---
 
@@ -85,6 +87,7 @@ Active task queue. Read before starting non-trivial work. Full phase specs in `d
 
 ## Recently completed
 
+- 2026-05-24: **Sessions v1** — `session-store` (file persistence, human rail, fork-on-edit) + `chat-panel` (rail, session picker, fork overlay). Handoff: [`docs/decisions/009-sessions-file-store.draft.md`](docs/decisions/009-sessions-file-store.draft.md).
 - 2026-05-24: MCP stdio server (`tools/mcp-server/`) + `.cursor/mcp.json` — Builder agent can now join conversations.
 - 2026-05-24: Phase 3 (3.1, 3.2, 3.4 + temporal artifact) — skill runner, validation, run logger, date rule. 11 new tests. 3.3 awaits human demo run.
 - 2026-05-24: Phase 2 (2.1–2.6) — full AI harness as extensions. 63 tests pass.

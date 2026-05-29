@@ -25,6 +25,8 @@ export type WindowChromeContext = {
   restoreBtn: HTMLButtonElement;
   getWindowFrame: () => WindowFrameState;
   refreshWindowFrame: () => Promise<void>;
+  /** Sync-write the in-memory frame (used on pagehide when async capture may not finish). */
+  flushWindowFrame?: () => void;
   onLayoutChanged: () => void;
   /** Fullscreen only: re-dock menu bar after title-bar drag. */
   onMenuDockDrag: (event: PointerEvent) => void;

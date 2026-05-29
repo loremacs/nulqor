@@ -15,6 +15,7 @@
 | `decisions/004-concurrency-and-sidecars.md` | Core owns concurrency; sidecars gated and lifecycle-managed | Before any async work or process spawning |
 | `decisions/005-stack-choice.md` | Why Tauri 2 + Rust + TypeScript | If stack rationale is questioned |
 | `decisions/006-http-api-and-observer-protocol.md` | Complete Phase 2 implementation spec (HTTP API, WebSocket, observer protocol, MCP) | Before any Phase 2 work |
+| `decisions/009-sessions-file-store.draft.md` | Sessions file store, thread vs room chat, human rail, forks, agent boundaries (draft handoff) | Before chat/session/group-chat work |
 
 ## Layout contract
 

@@ -38,8 +38,13 @@ import {
   dedupeOpenPanelIds,
   dedupePanelAssignmentsInTree,
   allPanelIdsInTree,
+  ensureOpenPanelsInTree,
 } from "./split-layout";
-import { renderSplitLayout, removePanelFromTree, syncSplitTreeFromDom } from "./split-render";
+import {
+  renderSplitLayout,
+  removePanelFromTree,
+  syncSplitTreeFromDom,
+} from "./split-render";
 import type { BuiltInPreset, SplitCanvasState } from "./split-layout";
 import { BUILT_IN_PRESETS, defaultSplitState } from "./split-layout";
 import { mountClickThrough } from "./click-through";
@@ -63,7 +68,12 @@ import {
   type TileLayout,
   type WindowFrameState,
 } from "./types";
-import { captureWindowFrame, DEFAULT_WINDOWED_FRAME } from "./window-frame";
+import {
+  captureWindowFrame,
+  DEFAULT_WINDOWED_FRAME,
+  syncWindowFrameToDisk,
+} from "./window-frame";
+import { mountWindowResize } from "./window-resize";
 import { mountWindowChrome } from "./window-chrome";
 import type { WindowMode } from "./window-chrome";
 
@@ -278,7 +288,11 @@ function syncMenuCheckRow(row: HTMLElement, checked: boolean): void {
 
 function setWindowModePresentation(mode: WindowMode): void {
   document.documentElement.dataset.nulqorWindowMode = mode;
-  const bg = mode === "windowed" ? WINDOWED_SHELL_BG : "transparent";
+  const startupHidden = document.documentElement.classList.contains(
+    "nulqor-startup-hidden",
+  );
+  const bg =
+    mode === "windowed" && !startupHidden ? WINDOWED_SHELL_BG : "transparent";
   document.documentElement.style.backgroundColor = bg;
   document.body.style.backgroundColor = bg;
   const app = document.getElementById("app");
@@ -355,6 +369,11 @@ export async function initShell(): Promise<void> {
     ) ?? [],
   );
 
+  const startupPanels = canvasConfig.open_panels.filter((id) =>
+    canvasConfig.panels.some((p) => p.id === id),
+  );
+  openPanelIds = dedupeOpenPanelIds([...openPanelIds, ...startupPanels]);
+
   if (openPanelIds.length === 0) {
     openPanelIds = dedupeOpenPanelIds([...canvasConfig.open_panels]);
   }
@@ -380,6 +399,12 @@ export async function initShell(): Promise<void> {
       ...allPanelIdsInTree(splitState.tree),
       ...openPanelIds,
     ]);
+  }
+  if (canvasMode === "split") {
+    splitState = {
+      ...splitState,
+      tree: ensureOpenPanelsInTree(splitState.tree, openPanelIds),
+    };
   }
   let canvasProfiles = normalizeProfileSlots(persisted?.canvasProfiles);
   let activeProfileId: string | null = persisted?.activeProfileId ?? null;
@@ -407,6 +432,10 @@ export async function initShell(): Promise<void> {
               <button type="button" class="menu-dropdown-row menu-dropdown-row-check" data-setting="always_on_top" role="menuitemcheckbox" aria-checked="false">
                 <span class="menu-dropdown-gutter menu-dropdown-check" aria-hidden="true"></span>
                 <span class="menu-dropdown-text">Always on Top</span>
+              </button>
+              <button type="button" class="menu-dropdown-row" data-action="workbench-reset" title="Clears all Workbench enable/disable toggles for extensions, skills, rules, and agents. Does not change files or nulqor.toml.">
+                <span class="menu-dropdown-gutter" aria-hidden="true"></span>
+                <span class="menu-dropdown-text">Reset Workbench toggles</span>
               </button>
             </div>
           </div>
@@ -468,6 +497,8 @@ export async function initShell(): Promise<void> {
   setMenuDock(menuDock);
 
   const clickThrough = mountClickThrough(false);
+  const windowResize = mountWindowResize(() => windowMode === "windowed");
+  windowResize.setEnabled(windowMode === "windowed");
   const menuDockPreview = mountMenuDockPreview(shellRoot);
   let toastHideTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -481,7 +512,11 @@ export async function initShell(): Promise<void> {
     message: string,
     options: ShellToastOptions = {},
   ): void => {
-    const { durationMs = 3200, tone = "default", placement = "bottom" } = options;
+    const {
+      durationMs = 3200,
+      tone = "default",
+      placement = "bottom",
+    } = options;
     let toast = document.body.querySelector<HTMLElement>(".shell-toast");
     if (!toast) {
       toast = document.createElement("div");
@@ -510,6 +545,7 @@ export async function initShell(): Promise<void> {
   ): void => {
     windowMode = mode;
     setWindowModePresentation(mode);
+    windowResize.setEnabled(mode === "windowed");
 
     if (mode === "windowed") {
       clickThrough.setEnabled(false);
@@ -730,18 +766,21 @@ export async function initShell(): Promise<void> {
   };
 
   const refreshWindowFrame = async (): Promise<void> => {
-    windowFrame = await captureWindowFrame();
+    windowFrame = await captureWindowFrame(windowFrame);
     persist();
   };
 
   const assignOpenPanelsToEmptyLeaves = (): void => {
     splitState = {
       ...splitState,
-      tree: syncSplitTreeFromGridLayouts(
-        splitState.tree,
+      tree: ensureOpenPanelsInTree(
+        syncSplitTreeFromGridLayouts(
+          splitState.tree,
+          openPanelIds,
+          panelLayouts,
+          shell,
+        ),
         openPanelIds,
-        panelLayouts,
-        shell,
       ),
     };
   };
@@ -1295,12 +1334,38 @@ export async function initShell(): Promise<void> {
   });
 
   settingsPanel.addEventListener("click", (event) => {
+    const actionRow = (event.target as HTMLElement).closest<HTMLButtonElement>(
+      "[data-action='workbench-reset']",
+    );
+    if (actionRow) {
+      void (async () => {
+        try {
+          await invoke("core_invoke", {
+            id: "workbench:reset@1",
+            input: {},
+          });
+          showShellToast("Workbench toggles reset — all extensions, skills, rules, and agents re-enabled.", {
+            placement: "top",
+          });
+        } catch (err) {
+          showShellToast(`Reset failed: ${err}`, {
+            tone: "alert",
+            placement: "top",
+          });
+        }
+      })();
+      return;
+    }
+
     const row = (event.target as HTMLElement).closest<HTMLButtonElement>(
       ".menu-dropdown-row-check",
     );
     if (!row?.dataset.setting) return;
     const key = row.dataset.setting;
-    if (key === "click_through" && row.getAttribute("aria-disabled") === "true") {
+    if (
+      key === "click_through" &&
+      row.getAttribute("aria-disabled") === "true"
+    ) {
       showShellToast("Click-through is only available in fullscreen.", {
         tone: "alert",
         placement: "top",
@@ -1398,6 +1463,10 @@ export async function initShell(): Promise<void> {
     restoreBtn,
     getWindowFrame: () => windowFrame,
     refreshWindowFrame,
+    flushWindowFrame: () => {
+      persist();
+      void syncWindowFrameToDisk(windowFrame);
+    },
     onLayoutChanged: () => {
       refreshGrid();
       if (canvasMode === "grid") {
@@ -1425,9 +1494,11 @@ export async function initShell(): Promise<void> {
     initialMode: windowMode,
   });
 
-  void windowChrome.syncUi().then(() => {
-    applyWindowModePolicy(windowChrome.getWindowMode(), windowChrome.getWindowMode());
-  });
+  await windowChrome.syncUi();
+  applyWindowModePolicy(
+    windowChrome.getWindowMode(),
+    windowChrome.getWindowMode(),
+  );
 
   menuBar.addEventListener("pointerdown", (event) => {
     const target = event.target as HTMLElement;

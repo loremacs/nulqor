@@ -7,8 +7,16 @@ pub mod host;
 pub mod hello_panel;
 #[path = "../../../extensions/hello-world/src/lib.rs"]
 pub mod hello_world;
+#[path = "../../../extensions/provider-common/src/lib.rs"]
+pub mod provider_common;
 #[path = "../../../extensions/provider-lmstudio/src/lib.rs"]
 pub mod provider_lmstudio;
+#[path = "../../../extensions/provider-ollama/src/lib.rs"]
+pub mod provider_ollama;
+#[path = "../../../extensions/provider-llamacpp/src/lib.rs"]
+pub mod provider_llamacpp;
+#[path = "../../../extensions/provider-router/src/lib.rs"]
+pub mod provider_router;
 #[path = "../../../extensions/transcript/src/lib.rs"]
 pub mod transcript;
 #[path = "../../../extensions/http-api/src/lib.rs"]
@@ -30,4 +38,12 @@ pub mod run_logger;
 
 #[path = "../../../extensions/clock-panel/src/lib.rs"]
 pub mod clock_panel;
+
+
+#[path = "../../../extensions/registry/src/lib.rs"]
+pub mod registry;
+
+
+#[path = "../../../extensions/workbench/src/lib.rs"]
+pub mod workbench;
 

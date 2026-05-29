@@ -1,0 +1,75 @@
+[extension]
+id             = "provider-router"
+version        = "0.1.0"
+kind           = "Service"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+
+[[commands]]
+id           = "provider:connect@1"
+owner        = "provider-router"
+permission   = "read"
+input-schema  = '{ "url": "string", "model": "string" }'
+output-schema = '{ "ok": "boolean", "connected": "boolean", "active": "string", "nulqor_loaded": "boolean" }'
+
+[[commands]]
+id           = "provider:disconnect@1"
+owner        = "provider-router"
+permission   = "read"
+output-schema = '{ "ok": "boolean" }'
+
+[[commands]]
+id           = "provider:select-model@1"
+owner        = "provider-router"
+permission   = "read"
+input-schema  = '{ "model": "string" }'
+output-schema = '{ "ok": "boolean", "active": "string", "nulqor_loaded": "boolean" }'
+
+[[commands]]
+id           = "provider:stop-model@1"
+owner        = "provider-router"
+permission   = "read"
+output-schema = '{ "ok": "boolean", "stopped": "boolean", "active": "string|null" }'
+
+[[commands]]
+id           = "provider:unload-model@1"
+owner        = "provider-router"
+permission   = "read"
+input-schema  = '{ "model": "string" }'
+output-schema = '{ "ok": "boolean", "stopped": "boolean" }'
+
+[[commands]]
+id           = "provider:loaded-models@1"
+owner        = "provider-router"
+permission   = "read"
+input-schema  = '{ "refresh": "boolean?", "url": "string?" }'
+output-schema = '{ "loaded": "array" }'
+
+[[commands]]
+id           = "provider:models@1"
+owner        = "provider-router"
+permission   = "read"
+input-schema  = '{ "refresh": "boolean?", "url": "string?" }'
+output-schema = '{ "models": "array", "active": "string|null", "connected": "boolean", "nulqor_loaded_active": "boolean" }'
+
+[[commands]]
+id           = "provider:generate@1"
+owner        = "provider-router"
+permission   = "write"
+callable-by  = ["panel", "agent", "service"]
+input-schema  = '{ "messages": "array", "model": "string?", "agent": "string?", "system_prompt": "string?", "temperature": "number?", "max_tokens": "number?" }'
+output-schema = '{ "stream_id": "string" }'
+
+[[commands]]
+id           = "provider:info@1"
+owner        = "provider-router"
+permission   = "read"
+output-schema = '{ "active": "string", "providers": "array", "available": "array" }'
+
+[[commands]]
+id           = "provider:set-active@1"
+owner        = "provider-router"
+permission   = "read"
+input-schema  = '{ "provider": "string" }'
+output-schema = '{ "active": "string", "default_url": "string" }'

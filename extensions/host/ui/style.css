@@ -37,16 +37,41 @@ body,
   pointer-events: none;
 }
 
-html[data-nulqor-window-mode="windowed"],
-html[data-nulqor-window-mode="windowed"] body,
-html[data-nulqor-window-mode="windowed"] #app {
+html[data-nulqor-window-mode="windowed"]:not(.nulqor-startup-hidden),
+html[data-nulqor-window-mode="windowed"]:not(.nulqor-startup-hidden) body,
+html[data-nulqor-window-mode="windowed"]:not(.nulqor-startup-hidden) #app {
   background: var(--windowed-shell-bg) !important;
   background-color: var(--windowed-shell-bg) !important;
+}
+
+html.nulqor-startup-hidden .nulqor-shell,
+html.nulqor-startup-hidden .nulqor-shell .desktop-canvas,
+html.nulqor-startup-hidden .nulqor-shell .desktop-grid,
+html.nulqor-startup-hidden .nulqor-shell .desktop-split {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+html.nulqor-startup-hidden.nulqor-startup-windowed .nulqor-shell,
+html.nulqor-startup-hidden.nulqor-startup-windowed
+  .nulqor-shell
+  .desktop-canvas,
+html.nulqor-startup-hidden.nulqor-startup-windowed .nulqor-shell .desktop-grid,
+html.nulqor-startup-hidden.nulqor-startup-windowed
+  .nulqor-shell
+  .desktop-split {
+  background: #121216 !important;
+  background-color: #121216 !important;
 }
 
 .nulqor-shell[data-window-mode="windowed"] {
   background: var(--windowed-shell-bg);
   pointer-events: auto;
+}
+
+html.nulqor-startup-hidden .nulqor-shell[data-window-mode="windowed"] {
+  background: transparent;
+  pointer-events: none;
 }
 
 .nulqor-shell[data-window-mode="windowed"] .desktop-canvas,
@@ -1107,4 +1132,135 @@ html[data-nulqor-window-mode="windowed"] #app {
     linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
   background-size: calc(var(--cell-size) + var(--grid-gap))
     calc(var(--cell-size) + var(--grid-gap));
+}
+
+.window-resize-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 100002;
+  pointer-events: none;
+}
+
+.window-resize-layer:not([hidden]) .window-resize-handle {
+  pointer-events: auto;
+}
+
+.window-resize-handle {
+  position: absolute;
+  touch-action: none;
+}
+
+.window-resize-n {
+  top: 0;
+  left: 10px;
+  right: 10px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.window-resize-s {
+  bottom: 0;
+  left: 10px;
+  right: 10px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.window-resize-e {
+  right: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.window-resize-w {
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.window-resize-ne,
+.window-resize-nw,
+.window-resize-se,
+.window-resize-sw {
+  width: 12px;
+  height: 12px;
+}
+
+.window-resize-ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.window-resize-nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.window-resize-se {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+}
+
+.window-resize-sw {
+  left: 0;
+  bottom: 0;
+  cursor: nesw-resize;
+}
+
+/* ── Scrollbars (VS Code–style) ─────────────────────────────────────────── */
+
+:root {
+  --nulqor-scrollbar-size: 10px;
+  --nulqor-scrollbar-thumb: rgba(121, 121, 121, 0.4);
+  --nulqor-scrollbar-thumb-hover: rgba(100, 100, 100, 0.7);
+  --nulqor-scrollbar-thumb-active: rgba(191, 191, 191, 0.4);
+}
+
+#app,
+#app * {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+#app *:hover {
+  scrollbar-color: var(--nulqor-scrollbar-thumb) transparent;
+}
+
+#app *::-webkit-scrollbar {
+  width: var(--nulqor-scrollbar-size);
+  height: var(--nulqor-scrollbar-size);
+}
+
+#app *::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#app *::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+#app *::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 0;
+}
+
+#app *:hover::-webkit-scrollbar-thumb {
+  background-color: var(--nulqor-scrollbar-thumb);
+}
+
+#app *::-webkit-scrollbar-thumb:hover {
+  background-color: var(--nulqor-scrollbar-thumb-hover);
+}
+
+#app *::-webkit-scrollbar-thumb:active {
+  background-color: var(--nulqor-scrollbar-thumb-active);
 }

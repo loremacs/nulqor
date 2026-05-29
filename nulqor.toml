@@ -1,18 +1,26 @@
 # Nulqor startup — shell loads host desk; panels open as tiles on the grid.
-# Restart after changing enabled_extensions. Panel open/close is live in the Apps menu.
+# Restart after changing enabled_extensions or active_provider.
+# Panel open/close is live in the Apps menu.
 
-open_panels = ["hello-world", "clock-panel", "chat-panel"]
+active_provider = "lmstudio"
+
+open_panels = ["hello-world", "clock-panel", "chat-panel", "workbench"]
 
 enabled_extensions = [
   "host",
   "hello-world",
   "clock-panel",
   "provider-lmstudio",
+  "provider-ollama",
+  "provider-llamacpp",
+  "provider-router",
   "transcript",
   "session-store",
   "http-api",
   "chat-panel",
   "context-editor",
+  "registry",
+  "workbench",
   "run-logger",
 ]
 
@@ -22,6 +30,11 @@ snap_enabled = true
 show_grid = true
 click_through = true
 always_on_top = false
+
+# Switch local backend (must be in enabled_extensions):
+#   active_provider = "lmstudio"   # LM Studio — http://localhost:1234
+#   active_provider = "ollama"     # Ollama — http://localhost:11434
+#   active_provider = "llamacpp"   # llama.cpp server — http://localhost:8080
 
 # Full harness (MCP, skills, validation):
 # enabled_extensions += ["hello-panel", "mcp-bridge", "skill-runner", "validation"]

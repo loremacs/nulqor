@@ -4,7 +4,7 @@
 //! The frontend MUST go through this bridge; it may not call extension internals directly.
 //!
 //! Commands exposed to TypeScript:
-//! - `core_invoke`       — invoke a versioned command by id
+//! - `core_invoke`       — invoke a versioned command by id (runs on blocking pool — never freezes UI)
 //! - `core_list_commands` — introspect available commands (debugging / dev tools)
 
 use tauri::State;
@@ -18,18 +18,21 @@ use crate::types::CommandId;
 /// `input` — JSON input passed to the command handler
 ///
 /// Returns the JSON output of the command, or an error string.
+///
+/// Long-running handlers (e.g. LM Studio model load) run on the async runtime's
+/// blocking thread pool so the WebView / window chrome stay responsive.
 #[tauri::command]
-pub fn core_invoke(
+pub async fn core_invoke(
     id: String,
     input: serde_json::Value,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let cmd_id =
         CommandId::parse(&id).map_err(|e| format!("invalid command id '{id}': {e}"))?;
-    state
-        .core
-        .commands
-        .invoke("frontend", &cmd_id, input)
+    let commands = state.core.commands.clone();
+    tauri::async_runtime::spawn_blocking(move || commands.invoke("frontend", &cmd_id, input))
+        .await
+        .map_err(|e| format!("command task failed: {e}"))?
         .map_err(|e| e.to_string())
 }
 

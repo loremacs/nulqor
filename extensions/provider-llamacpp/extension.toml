@@ -1,0 +1,80 @@
+[extension]
+id             = "provider-llamacpp"
+version        = "0.1.0"
+kind           = "Provider"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+http-hosts     = ["localhost"]
+
+[[provides]]
+capability = "provider"
+instance   = "llamacpp"
+contract   = "provider@1"
+
+[[commands]]
+id           = "llamacpp:connect@1"
+owner        = "provider-llamacpp"
+permission   = "read"
+input-schema  = '{ "url": "string", "model": "string" }'
+output-schema = '{ "ok": "boolean", "connected": "boolean", "active": "string", "nulqor_loaded": "boolean" }'
+
+[[commands]]
+id           = "llamacpp:disconnect@1"
+owner        = "provider-llamacpp"
+permission   = "read"
+output-schema = '{ "ok": "boolean" }'
+
+[[commands]]
+id           = "llamacpp:select-model@1"
+owner        = "provider-llamacpp"
+permission   = "read"
+input-schema  = '{ "model": "string" }'
+output-schema = '{ "ok": "boolean", "active": "string", "nulqor_loaded": "boolean" }'
+
+[[commands]]
+id           = "llamacpp:stop-model@1"
+owner        = "provider-llamacpp"
+permission   = "read"
+output-schema = '{ "ok": "boolean", "stopped": "boolean", "active": "string|null" }'
+
+[[commands]]
+id           = "llamacpp:unload-model@1"
+owner        = "provider-llamacpp"
+permission   = "read"
+input-schema  = '{ "model": "string" }'
+output-schema = '{ "ok": "boolean", "stopped": "boolean" }'
+
+[[commands]]
+id           = "llamacpp:loaded-models@1"
+owner        = "provider-llamacpp"
+permission   = "read"
+input-schema  = '{ "refresh": "boolean?", "url": "string?" }'
+output-schema = '{ "loaded": "array" }'
+
+[[commands]]
+id           = "llamacpp:models@1"
+owner        = "provider-llamacpp"
+permission   = "read"
+input-schema  = '{ "refresh": "boolean?", "url": "string?" }'
+output-schema = '{ "models": "array", "active": "string|null", "connected": "boolean", "nulqor_loaded_active": "boolean" }'
+
+[[commands]]
+id           = "llamacpp:generate@1"
+owner        = "provider-llamacpp"
+permission   = "write"
+callable-by  = ["panel", "agent", "service"]
+input-schema  = '{ "messages": "array", "model": "string?", "agent": "string?", "system_prompt": "string?", "temperature": "number?", "max_tokens": "number?" }'
+output-schema = '{ "stream_id": "string" }'
+
+[[publishes]]
+id = "provider:stream-start@1"
+
+[[publishes]]
+id = "provider:stream-delta@1"
+
+[[publishes]]
+id = "provider:stream-done@1"
+
+[[publishes]]
+id = "provider:stream-error@1"

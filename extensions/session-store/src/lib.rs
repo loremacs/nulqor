@@ -108,6 +108,10 @@ impl StorePaths {
         self.sessions.join(format!("{id}.jsonl"))
     }
 
+    fn session_context_file(&self, id: &str) -> PathBuf {
+        self.sessions.join(format!("{id}.context.json"))
+    }
+
     fn rail_file(&self, id: &str) -> PathBuf {
         self.rails.join(format!("{id}.json"))
     }
@@ -124,6 +128,9 @@ impl StorePaths {
         std::fs::create_dir_all(&self.sessions)?;
         std::fs::create_dir_all(&self.rails)?;
         std::fs::create_dir_all(&self.branches)?;
+        if let Some(human) = self.catalog.parent() {
+            std::fs::create_dir_all(human)?;
+        }
         Ok(())
     }
 }
@@ -213,6 +220,12 @@ impl Extension for SessionStoreExtension {
             ctx.commands.clone(),
         )?;
         register_active(self.paths.clone(), self.active_id.clone(), &ctx.commands)?;
+        register_update(self.paths.clone(), &ctx.commands)?;
+        register_delete(
+            self.paths.clone(),
+            self.active_id.clone(),
+            ctx.commands.clone(),
+        )?;
         register_edit_message(
             self.paths.clone(),
             self.active_id.clone(),
@@ -415,6 +428,90 @@ fn upsert_catalog_entry(
     write_json(&paths.catalog, &catalog)
 }
 
+fn update_catalog_entry(
+    paths: &StorePaths,
+    id: &str,
+    title: Option<&str>,
+    summary: Option<&str>,
+) -> Result<(), CoreError> {
+    let mut catalog: Catalog = if paths.catalog.exists() {
+        read_json(&paths.catalog)?
+    } else {
+        Catalog::default()
+    };
+
+    let entry = catalog
+        .sessions
+        .iter_mut()
+        .find(|e| e.id == id)
+        .ok_or_else(|| CoreError::Io(format!("session not found: {id}")))?;
+
+    if let Some(t) = title {
+        entry.title = t.to_owned();
+    }
+    if let Some(s) = summary {
+        entry.summary = s.to_owned();
+    }
+    entry.updated = Utc::now();
+    catalog.sessions.sort_by(|a, b| b.updated.cmp(&a.updated));
+    write_json(&paths.catalog, &catalog)
+}
+
+fn delete_session_files(paths: &StorePaths, session_id: &str) -> Result<(), CoreError> {
+    let session_path = paths.session_file(session_id);
+    if session_path.exists() {
+        std::fs::remove_file(&session_path).map_err(io_err)?;
+    }
+    let context_path = paths.session_context_file(session_id);
+    if context_path.exists() {
+        std::fs::remove_file(&context_path).map_err(io_err)?;
+    }
+    let rail_path = paths.rail_file(session_id);
+    if rail_path.exists() {
+        std::fs::remove_file(&rail_path).map_err(io_err)?;
+    }
+    let branch_path = paths.branch_dir(session_id);
+    if branch_path.exists() {
+        std::fs::remove_dir_all(&branch_path).map_err(io_err)?;
+    }
+    Ok(())
+}
+
+/// Ensure `.nulqor/sessions/<id>.jsonl` and rail stub exist for a catalog entry.
+fn ensure_session_materialized(paths: &StorePaths, session_id: &str) -> Result<(), CoreError> {
+    paths.ensure_dirs().map_err(io_err)?;
+    if !paths.session_file(session_id).exists() {
+        rewrite_session_file(paths, session_id, &[])?;
+    }
+    if !paths.rail_file(session_id).exists() {
+        init_rail(paths, session_id)?;
+    }
+    Ok(())
+}
+
+fn session_has_artifacts(paths: &StorePaths, session_id: &str) -> bool {
+    paths.session_file(session_id).exists()
+        || paths.rail_file(session_id).exists()
+        || paths.branch_dir(session_id).exists()
+}
+
+fn create_empty_session(
+    paths: &StorePaths,
+    active: &Arc<RwLock<String>>,
+    cmds: &Arc<crate::commands::CommandRegistry>,
+    title: &str,
+) -> Result<String, CoreError> {
+    let id = new_session_id();
+    rewrite_session_file(paths, &id, &[])?;
+    init_rail(paths, &id)?;
+    let now = Utc::now();
+    upsert_catalog_entry(paths, &id, title, "", now, now)?;
+    set_active_session(paths, &id)?;
+    *active.write().unwrap() = id.clone();
+    hydrate_transcript(cmds, &[])?;
+    Ok(id)
+}
+
 fn init_rail(paths: &StorePaths, session_id: &str) -> Result<(), CoreError> {
     write_json(
         &paths.rail_file(session_id),
@@ -578,11 +675,15 @@ fn register_list(
             permission: Permission::Read,
         },
         Arc::new(move |_| {
+            paths.ensure_dirs().map_err(io_err)?;
             let catalog: Catalog = if paths.catalog.exists() {
                 read_json(&paths.catalog)?
             } else {
                 Catalog::default()
             };
+            for entry in &catalog.sessions {
+                ensure_session_materialized(&paths, &entry.id)?;
+            }
             Ok(serde_json::json!({
                 "sessions": catalog.sessions,
                 "active_session_id": active.read().unwrap().clone(),
@@ -611,13 +712,13 @@ fn register_create(
             permission: Permission::Write,
         },
         Arc::new(move |input| {
+            paths.ensure_dirs().map_err(io_err)?;
             let id = new_session_id();
             let title = input["title"]
                 .as_str()
                 .unwrap_or("New session")
                 .to_owned();
-            rewrite_session_file(&paths, &id, &[])?;
-            init_rail(&paths, &id)?;
+            ensure_session_materialized(&paths, &id)?;
             let now = Utc::now();
             upsert_catalog_entry(&paths, &id, &title, "", now, now)?;
             set_active_session(&paths, &id)?;
@@ -652,9 +753,16 @@ fn register_load(
                 .as_str()
                 .ok_or_else(|| CoreError::Io("load: session_id required".into()))?
                 .to_owned();
-            if !paths.session_file(&session_id).exists() {
+            let catalog: Catalog = if paths.catalog.exists() {
+                read_json(&paths.catalog)?
+            } else {
+                Catalog::default()
+            };
+            let in_catalog = catalog.sessions.iter().any(|e| e.id == session_id);
+            if !in_catalog && !session_has_artifacts(&paths, &session_id) {
                 return Err(CoreError::Io(format!("session not found: {session_id}")));
             }
+            ensure_session_materialized(&paths, &session_id)?;
             set_active_session(&paths, &session_id)?;
             *active.write().unwrap() = session_id.clone();
             let messages = read_session_messages(&paths, &session_id)?;
@@ -680,7 +788,7 @@ fn register_active(
             owner: "session-store".into(),
             input_schema: "{}".into(),
             output_schema: r#"{ "session_id": "string", "entry": "object?" }"#.into(),
-            callable_by: vec!["panel".into()],
+            callable_by: vec!["panel".into(), "context-editor".into(), "service".into()],
             permission: Permission::Read,
         },
         Arc::new(move |_| {
@@ -692,6 +800,117 @@ fn register_active(
             };
             let entry = catalog.sessions.iter().find(|e| e.id == sid).cloned();
             Ok(serde_json::json!({ "session_id": sid, "entry": entry }))
+        }),
+    )
+}
+
+fn register_update(
+    paths: StorePaths,
+    cmds: &Arc<crate::commands::CommandRegistry>,
+) -> Result<(), CoreError> {
+    cmds.register(
+        CommandDecl {
+            id: CommandId {
+                namespace: "sessions".into(),
+                action: "update".into(),
+                version: 1,
+            },
+            owner: "session-store".into(),
+            input_schema: r#"{ "session_id": "string", "title": "string?", "summary": "string?" }"#.into(),
+            output_schema: r#"{ "ok": "boolean", "session": "object" }"#.into(),
+            callable_by: vec!["panel".into()],
+            permission: Permission::Write,
+        },
+        Arc::new(move |input| {
+            let session_id = input["session_id"]
+                .as_str()
+                .ok_or_else(|| CoreError::Io("update: session_id required".into()))?
+                .to_owned();
+            let title = input.get("title").and_then(|v| v.as_str());
+            let summary = input.get("summary").and_then(|v| v.as_str());
+            if title.is_none() && summary.is_none() {
+                return Err(CoreError::Io(
+                    "update: at least one of title or summary required".into(),
+                ));
+            }
+            update_catalog_entry(&paths, &session_id, title, summary)?;
+            let catalog: Catalog = read_json(&paths.catalog)?;
+            let session = catalog
+                .sessions
+                .iter()
+                .find(|e| e.id == session_id)
+                .cloned()
+                .ok_or_else(|| CoreError::Io(format!("session not found: {session_id}")))?;
+            Ok(serde_json::json!({ "ok": true, "session": session }))
+        }),
+    )
+}
+
+fn register_delete(
+    paths: StorePaths,
+    active: Arc<RwLock<String>>,
+    cmds: Arc<crate::commands::CommandRegistry>,
+) -> Result<(), CoreError> {
+    let cmds_for_handler = cmds.clone();
+    cmds.register(
+        CommandDecl {
+            id: CommandId {
+                namespace: "sessions".into(),
+                action: "delete".into(),
+                version: 1,
+            },
+            owner: "session-store".into(),
+            input_schema: r#"{ "session_id": "string" }"#.into(),
+            output_schema: r#"{ "ok": "boolean", "deleted": "string", "active_session_id": "string" }"#.into(),
+            callable_by: vec!["panel".into()],
+            permission: Permission::Write,
+        },
+        Arc::new(move |input| {
+            let session_id = input["session_id"]
+                .as_str()
+                .ok_or_else(|| CoreError::Io("delete: session_id required".into()))?
+                .to_owned();
+
+            let mut catalog: Catalog = if paths.catalog.exists() {
+                read_json(&paths.catalog)?
+            } else {
+                Catalog::default()
+            };
+            let in_catalog = catalog.sessions.iter().any(|e| e.id == session_id);
+            let is_active = active.read().unwrap().clone() == session_id;
+            if !in_catalog && !session_has_artifacts(&paths, &session_id) && !is_active {
+                return Err(CoreError::Io(format!("session not found: {session_id}")));
+            }
+
+            if in_catalog {
+                catalog.sessions.retain(|e| e.id != session_id);
+                write_json(&paths.catalog, &catalog)?;
+            }
+            delete_session_files(&paths, &session_id)?;
+
+            let was_active = is_active;
+            let next_id = if was_active {
+                if let Some(next) = catalog.sessions.first() {
+                    let id = next.id.clone();
+                    ensure_session_materialized(&paths, &id)?;
+                    set_active_session(&paths, &id)?;
+                    *active.write().unwrap() = id.clone();
+                    let messages = read_session_messages(&paths, &id)?;
+                    rebuild_rail_from_messages(&paths, &id, &messages)?;
+                    hydrate_transcript(&cmds_for_handler, &messages)?;
+                    id
+                } else {
+                    create_empty_session(&paths, &active, &cmds_for_handler, "New chat")?
+                }
+            } else {
+                active.read().unwrap().clone()
+            };
+
+            Ok(serde_json::json!({
+                "ok": true,
+                "deleted": session_id,
+                "active_session_id": next_id,
+            }))
         }),
     )
 }
@@ -1028,20 +1247,49 @@ mod tests {
     }
 
     #[test]
-    fn catalog_round_trip() {
+    fn update_catalog_entry_changes_title_and_summary() {
         let paths = temp_store();
         let id = "test-session";
         upsert_catalog_entry(
             &paths,
             id,
-            "Test",
-            "hello world",
+            "Old title",
+            "Old summary",
             Utc::now(),
             Utc::now(),
         )
         .unwrap();
+        update_catalog_entry(&paths, id, Some("New title"), Some("New summary")).unwrap();
         let catalog: Catalog = read_json(&paths.catalog).unwrap();
-        assert_eq!(catalog.sessions.len(), 1);
-        assert_eq!(catalog.sessions[0].summary, "hello world");
+        assert_eq!(catalog.sessions[0].title, "New title");
+        assert_eq!(catalog.sessions[0].summary, "New summary");
+    }
+
+    #[test]
+    fn ensure_session_materialized_creates_missing_jsonl() {
+        let paths = temp_store();
+        let id = "stub-session";
+        upsert_catalog_entry(&paths, id, "Stub", "", Utc::now(), Utc::now()).unwrap();
+        assert!(!paths.session_file(id).exists());
+        ensure_session_materialized(&paths, id).unwrap();
+        assert!(paths.session_file(id).exists());
+        assert!(paths.rail_file(id).exists());
+    }
+
+    #[test]
+    fn delete_session_removes_catalog_and_files() {
+        let paths = temp_store();
+        let id = "to-delete";
+        upsert_catalog_entry(&paths, id, "Delete me", "", Utc::now(), Utc::now()).unwrap();
+        rewrite_session_file(&paths, id, &[]).unwrap();
+        init_rail(&paths, id).unwrap();
+        delete_session_files(&paths, id).unwrap();
+        let mut catalog: Catalog = read_json(&paths.catalog).unwrap();
+        catalog.sessions.retain(|e| e.id != id);
+        write_json(&paths.catalog, &catalog).unwrap();
+        let catalog: Catalog = read_json(&paths.catalog).unwrap();
+        assert!(catalog.sessions.is_empty());
+        assert!(!paths.session_file(id).exists());
+        assert!(!paths.rail_file(id).exists());
     }
 }

@@ -13,20 +13,54 @@ instance   = "lmstudio"
 contract   = "provider@1"
 
 [[commands]]
-id           = "provider:connect@1"
+id           = "lmstudio:connect@1"
 owner        = "provider-lmstudio"
 permission   = "read"
-input-schema  = '{ "url": "string" }'
-output-schema = '{ "ok": "boolean", "model_count": "number", "models": "array" }'
+input-schema  = '{ "url": "string", "model": "string" }'
+output-schema = '{ "ok": "boolean", "connected": "boolean", "active": "string", "nulqor_loaded": "boolean" }'
 
 [[commands]]
-id           = "provider:models@1"
+id           = "lmstudio:disconnect@1"
 owner        = "provider-lmstudio"
 permission   = "read"
-output-schema = '{ "models": "array", "active": "string|null" }'
+output-schema = '{ "ok": "boolean" }'
 
 [[commands]]
-id           = "provider:generate@1"
+id           = "lmstudio:select-model@1"
+owner        = "provider-lmstudio"
+permission   = "read"
+input-schema  = '{ "model": "string" }'
+output-schema = '{ "ok": "boolean", "active": "string", "nulqor_loaded": "boolean" }'
+
+[[commands]]
+id           = "lmstudio:stop-model@1"
+owner        = "provider-lmstudio"
+permission   = "read"
+output-schema = '{ "ok": "boolean", "stopped": "boolean", "active": "string|null" }'
+
+[[commands]]
+id           = "lmstudio:unload-model@1"
+owner        = "provider-lmstudio"
+permission   = "read"
+input-schema  = '{ "model": "string" }'
+output-schema = '{ "ok": "boolean", "stopped": "boolean" }'
+
+[[commands]]
+id           = "lmstudio:loaded-models@1"
+owner        = "provider-lmstudio"
+permission   = "read"
+input-schema  = '{ "refresh": "boolean?", "url": "string?" }'
+output-schema = '{ "loaded": "array" }'
+
+[[commands]]
+id           = "lmstudio:models@1"
+owner        = "provider-lmstudio"
+permission   = "read"
+input-schema  = '{ "refresh": "boolean?", "url": "string?" }'
+output-schema = '{ "models": "array", "active": "string|null", "connected": "boolean", "nulqor_loaded_active": "boolean" }'
+
+[[commands]]
+id           = "lmstudio:generate@1"
 owner        = "provider-lmstudio"
 permission   = "write"
 callable-by  = ["panel", "agent", "service"]

@@ -230,6 +230,29 @@ export function fillEmptyLeaves(
   return cloned;
 }
 
+/** Split leaves until every open panel has a slot (split canvas mode). */
+export function ensureOpenPanelsInTree(
+  tree: SplitNode,
+  openPanelIds: string[],
+): SplitNode {
+  let next = tree;
+  while (true) {
+    const placed = new Set(allPanelIdsInTree(next));
+    const missing = openPanelIds.filter((id) => !placed.has(id));
+    if (missing.length === 0) break;
+
+    const leaves = collectLeaves(next);
+    const target =
+      leaves.find((l) => !l.subGrid?.enabled && l.panelId) ??
+      leaves.find((l) => !l.subGrid?.enabled);
+    if (!target) break;
+
+    next = splitLeaf(next, target.id, "horizontal");
+    next = fillEmptyLeaves(next, openPanelIds);
+  }
+  return next;
+}
+
 export function findSplitContainer(
   root: SplitNode,
   id: string,

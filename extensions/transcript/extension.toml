@@ -5,7 +5,7 @@ kind           = "Service"
 api-version    = "v1"
 schema-version = "1.0.0"
 min-core       = "0.1.0"
-requires       = ["provider-lmstudio"]
+requires       = ["provider-router"]
 
 [[commands]]
 id           = "transcript:get@1"

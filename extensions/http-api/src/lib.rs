@@ -255,6 +255,8 @@ fn build_router(state: ApiState) -> Router {
         .route("/health", get(health))
         .route("/models", get(list_models))
         .route("/connect", post(connect))
+        .route("/select-model", post(select_model))
+        .route("/stop-model", post(stop_model))
         .route("/transcript", get(get_transcript))
         .route("/message", post(send_message))
         .route("/observers/register", post(register_observer))
@@ -275,14 +277,33 @@ async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "ok": true }))
 }
 
-async fn list_models(AxumState(s): AxumState<ApiState>) -> Result<Json<serde_json::Value>, ApiError> {
-    let result = s.commands.invoke("http-api", &CommandId::parse("provider:models@1").unwrap(), serde_json::json!({}))?;
+async fn list_models(
+    AxumState(s): AxumState<ApiState>,
+    Query(query): Query<ModelsQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let refresh = query.refresh.unwrap_or(false);
+    let mut input = serde_json::json!({ "refresh": refresh });
+    if let Some(url) = query.url {
+        input["url"] = serde_json::Value::String(url);
+    }
+    let result = s.commands.invoke(
+        "http-api",
+        &CommandId::parse("provider:models@1").unwrap(),
+        input,
+    )?;
     Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+struct ModelsQuery {
+    refresh: Option<bool>,
+    url: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct ConnectBody {
     url: String,
+    model: String,
 }
 
 async fn connect(
@@ -292,7 +313,33 @@ async fn connect(
     let result = s.commands.invoke(
         "http-api",
         &CommandId::parse("provider:connect@1").unwrap(),
-        serde_json::json!({ "url": body.url }),
+        serde_json::json!({ "url": body.url, "model": body.model }),
+    )?;
+    Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+struct SelectModelBody {
+    model: String,
+}
+
+async fn select_model(
+    AxumState(s): AxumState<ApiState>,
+    Json(body): Json<SelectModelBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let result = s.commands.invoke(
+        "http-api",
+        &CommandId::parse("provider:select-model@1").unwrap(),
+        serde_json::json!({ "model": body.model }),
+    )?;
+    Ok(Json(result))
+}
+
+async fn stop_model(AxumState(s): AxumState<ApiState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let result = s.commands.invoke(
+        "http-api",
+        &CommandId::parse("provider:stop-model@1").unwrap(),
+        serde_json::json!({}),
     )?;
     Ok(Json(result))
 }

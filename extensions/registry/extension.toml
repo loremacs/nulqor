@@ -1,0 +1,45 @@
+﻿[extension]
+id             = "registry"
+version        = "0.1.0"
+kind           = "Service"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+fs-scopes      = [".nulqor/"]
+
+[[commands]]
+id           = "extensions:list@1"
+owner        = "registry"
+permission   = "read"
+output-schema = '{ "extensions": "array" }'
+
+[[commands]]
+id           = "extensions:graph@1"
+owner        = "registry"
+permission   = "read"
+output-schema = '{ "nodes": "array", "edges": "array" }'
+
+[[commands]]
+id           = "commands:catalog@1"
+owner        = "registry"
+permission   = "read"
+output-schema = '{ "commands": "array" }'
+
+[[commands]]
+id           = "workbench:prefs@1"
+owner        = "registry"
+permission   = "read"
+output-schema = '{ "disabled_extensions": "array", "disabled_skills": "array", "disabled_rules": "array", "disabled_agents": "array" }'
+
+[[commands]]
+id           = "workbench:set-enabled@1"
+owner        = "registry"
+permission   = "write"
+input-schema  = '{ "kind": "string", "id": "string", "enabled": "boolean" }'
+output-schema = '{ "kind": "string", "id": "string", "enabled": "boolean" }'
+
+[[commands]]
+id           = "workbench:reset@1"
+owner        = "registry"
+permission   = "write"
+output-schema = '{ "reset": "boolean" }'
