@@ -101,6 +101,7 @@ Each main content area has an `index.md` that lists what lives there. **Read the
 - Run `skills/create-skill/scripts/create.ps1` when adding a new skill (or follow `skills/create-skill/SKILL.md`)
 - Run `skills/audit-skill/scripts/audit.ps1 -SkillName <name> -Quiet` after any skill change
 - Run `skills/audit-project/scripts/audit.ps1 -Quiet` after any file move, rename, restructure, or new extension
+- Honor `rules/engineering-guardrails.md` (polling vs events, validation honesty, lock-across-IO, port uniqueness, doc consistency); the agent-loop iteration cap (`docs/DESIGN.md §13`) ships in the same change as the loop, with its test
 - Report clearly when a command fails — never invent success
 - Determine state before interacting — never assume OS, tool, app, or runtime versions; check first, then act
 - When a tool call fails and a non-obvious workaround was required, flag it as a skill capture opportunity

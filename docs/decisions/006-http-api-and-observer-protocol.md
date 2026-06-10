@@ -23,7 +23,7 @@ Do not deviate without a new decision record.
 
 ---
 
-## 1. HTTP API surface (default port 8080)
+## 1. HTTP API surface (default port 8787, override via `NULQOR_PORT`)
 
 All endpoints operate against the single active in-memory session through the shared engine. The
 GUI and every external driver mutate the same session — this is the core demonstrated behavior.
@@ -285,7 +285,7 @@ Cursor MCP config reference:
     "nulqor": {
       "command": "<path-to-nulqor-mcp-binary>",
       "args": ["-mode", "mcp"],
-      "env": { "NULQOR_API_URL": "http://localhost:8080" }
+      "env": { "NULQOR_API_URL": "http://localhost:8787" }
     }
   }
 }
@@ -301,7 +301,7 @@ The HTTP API, transcript, and skill runner extensions should be configurable via
 ```toml
 [server]
 host = "localhost"
-port = 8080
+port = 8787
 
 [lmstudio]
 base_url = "http://localhost:1234/v1"

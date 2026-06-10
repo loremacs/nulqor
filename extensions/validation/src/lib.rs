@@ -103,13 +103,14 @@ fn run_check(check_type: &str, actual: &str, expected: &str) -> Result<(bool, St
             Ok((pass, reason))
         }
         "matches_regex" => {
-            // Simple manual check: does actual match the regex pattern?
-            // Uses the `regex` crate if available; falls back to contains for Phase 3.
-            let pass = actual.contains(expected);
+            let re = regex::Regex::new(expected).map_err(|e| {
+                CoreError::Io(format!("matches_regex: invalid pattern {expected:?}: {e}"))
+            })?;
+            let pass = re.is_match(actual);
             let reason = if pass {
-                format!("output matches pattern")
+                format!("output matches regex {expected:?}")
             } else {
-                format!("output does not match pattern: {expected:?}")
+                format!("output does not match regex {expected:?}")
             };
             Ok((pass, reason))
         }
@@ -206,6 +207,35 @@ mod tests {
     #[test]
     fn unknown_type_errors() {
         let result = run_check("bogus", "x", "");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn matches_regex_pass() {
+        let (pass, _) = check("matches_regex", "2026", r"^\d{4}$");
+        assert!(pass);
+    }
+
+    #[test]
+    fn matches_regex_fail() {
+        let (pass, _) = check("matches_regex", "year", r"^\d{4}$");
+        assert!(!pass);
+    }
+
+    #[test]
+    fn matches_regex_is_real_regex_not_substring() {
+        // A real regex distinguishes these; substring `contains` cannot.
+        // `^\d{4}$` matches the value "2026" but the literal pattern string
+        // is not a substring of "2026", so `contains` would disagree.
+        let (regex_pass, _) = check("matches_regex", "2026", r"^\d{4}$");
+        let (contains_pass, _) = check("contains", "2026", r"^\d{4}$");
+        assert!(regex_pass, "regex should match a 4-digit value");
+        assert!(!contains_pass, "contains must not treat the pattern as a substring");
+    }
+
+    #[test]
+    fn matches_regex_invalid_pattern_errors() {
+        let result = run_check("matches_regex", "x", "(unclosed");
         assert!(result.is_err());
     }
 

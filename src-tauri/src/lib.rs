@@ -42,8 +42,8 @@ use commands::CommandRegistry;
 use context::{AppState, CoreContext, InMemoryConfigStore};
 use events::EventBus;
 use extensions::{
-    chat_panel, clock_panel, context_editor, hello_panel, hello_world, host, http_api,
-    mcp_bridge, provider_llamacpp, provider_lmstudio, provider_ollama, provider_router,
+    chat_panel, clock_panel, context_editor, hello_panel, hello_world, host,
+    http_api, mcp_bridge, provider_llamacpp, provider_lmstudio, provider_ollama, provider_router,
     registry, run_logger, session_store, skill_runner, transcript, validation, workbench,
 };
 use startup_config::load_startup_config;

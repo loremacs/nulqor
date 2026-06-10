@@ -4,42 +4,47 @@ Quick-reference for building agents. Full spec in `BUILD_PLAN.md`.
 
 ---
 
-## Current: Phase 2 — First AI Harness ✅ GATE PASSED
+## Current: Phase 4 — Persistence & harness essentials (in progress)
 
-**Goal:** All AI behavior as extensions — no core changes.
+**Goal:** Durable sessions, project files, the agent loop, and a context manager — still extensions only.
 
 | Task | Status |
 |---|---|
-| 2.1 `provider-lmstudio` — LM Studio, single-flight queue, stream events (4 tests) | ✅ Done |
-| 2.2 `transcript` — shared session, message schema, stream-done subscription (3 tests) | ✅ Done |
-| 2.3 `http-api` — axum HTTP+WebSocket, observer/catch-up protocol (6 tests) | ✅ Done |
-| 2.4 `chat-panel` — TypeScript streaming UI, reasoning blocks, token budget | ✅ Done |
-| 2.5 `context-editor` — skills/agents/rules, system prompt assembly, hot-reload (4 tests) | ✅ Done |
-| 2.6 `mcp-bridge` — 5 MCP tools, NULQOR_API_URL, boundary enforcement (2 tests) | ✅ Done |
+| 4.1 Persistence extension — SQLite + FTS5 (index over `.nulqor/`, not a second truth store) | ⬜ Pending |
+| 4.2 Project save/load — `.nulqor` files | 🟡 Partial (sessions v1: `sessions/*.jsonl` + `human/**`; room mode, search, CLI parity in BACKLOG) |
+| 4.3 Agent-loop extension — plan→act→observe→verify (ships with the `DESIGN.md §13` iteration cap + its test) | ⬜ Pending |
+| 4.4 Context manager — token budget + compaction | ⬜ Pending |
+| 4.5 Decision-records workflow command | ⬜ Pending |
 
-**Gate verdict:** `cargo test --workspace` → 63/63 pass. HTTP API on port 8080 with full decisions/006 §1–3 surface. Linter clean on all Phase 2 extension manifests. No core files modified.
+See `TASKS.md` Phase 4 and `docs/decisions/009-sessions-file-store.draft.md` before continuing.
 
 ---
 
-## Up Next: Phase 3 — Prove the loop closes
+## Outstanding proof: Phase 3 task 3.3 — the loop must be *shown* to close
 
-The thesis test: pick one thing the Subject model reliably fails, author one artifact (skill/rule), show it now passes and holds on a second related task.
+Phases 0–2 gates passed; Phase 3 infrastructure shipped (skill-runner, validation, run-logger, the
+`rules/current-date.md` temporal artifact). **The one thing not yet done is the thesis itself:**
+task `3.3` — a human-driven Subject-model session demonstrating that one captured artifact turns a
+repeatable failure into a repeatable success, and holds on a second related task.
 
-**Known candidate (from `harness/runs/2026-05-24.jsonl`):** Gemma 4 E4B fails temporal questions (turns 3, 6, 7, 8, 18). Fix: inject current date into system prompt context.
+Until `3.3` is run and documented, every Phase 4+ feature is built on an undemonstrated bet. Treat
+`3.3` as the real exit gate for Phase 3.
 
-Tasks:
-1. Skill runner — `load_skill` tool, inject full skill body on demand
-2. Validation extension — deterministic pass/fail for bounded task checks
-3. Loop closure demo (human-guided)
-4. Run logging — `runs/YYYY-MM-DD.jsonl`
+**Known candidate (from `runs/2026-05-24.jsonl`):** Gemma 4 E4B fails temporal questions; fix is the
+current-date rule already shipped — it only needs the before/after demo recorded.
 
-**Gate:** Documented before/after with run logs proving one captured artifact closed a Subject failure.
+---
+
+## Gate history
+
+- **Gate 0/1/2: ✅ PASSED** — `cargo test --workspace` green; HTTP API (default port 8787, override
+  `NULQOR_PORT`) with full decisions/006 §1–3 surface; frozen core untouched.
+- **Gate 3:** open — blocked on `3.3` (the human-driven loop-closure demo).
 
 ---
 
 ## Upcoming
 
-- **Phase 4:** Persistence (SQLite), project files, agent loop, context manager
 - **Phase 5+:** A/B compare, bake/export, memory, linter UI, model routing
 
 See `BUILD_PLAN.md` for full task lists and gates.

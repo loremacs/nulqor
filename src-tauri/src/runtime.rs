@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub struct Runtime {
-    rt: Arc<tokio::runtime::Runtime>,
+    rt: Option<Arc<tokio::runtime::Runtime>>,
 }
 
 impl Runtime {
@@ -23,7 +23,12 @@ impl Runtime {
             .thread_name("nulqor-core")
             .build()
             .expect("failed to start Nulqor async runtime");
-        Self { rt: Arc::new(rt) }
+        Self { rt: Some(Arc::new(rt)) }
+    }
+
+    #[inline]
+    fn inner(&self) -> &Arc<tokio::runtime::Runtime> {
+        self.rt.as_ref().expect("core runtime already dropped")
     }
 
     /// Spawn a cancellable async task with a timeout budget.
@@ -32,7 +37,7 @@ impl Runtime {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.rt.spawn(async move {
+        self.inner().spawn(async move {
             let _ = tokio::time::timeout(budget, fut).await;
         });
     }
@@ -45,7 +50,7 @@ impl Runtime {
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
     {
-        self.rt.spawn_blocking(job)
+        self.inner().spawn_blocking(job)
     }
 
     /// Block the calling thread until `fut` completes on the core runtime.
@@ -54,7 +59,7 @@ impl Runtime {
     /// Prefer [`block_on_compat`](Self::block_on_compat) from command handlers
     /// that may be invoked while the HTTP API (or other async work) is active.
     pub fn block_on<F: Future>(&self, fut: F) -> F::Output {
-        self.rt.block_on(fut)
+        self.inner().block_on(fut)
     }
 
     /// Like `block_on`, but safe when the caller runs on a Tokio worker thread
@@ -70,9 +75,25 @@ impl Runtime {
         if tokio::runtime::Handle::try_current().is_ok() {
             // Called from a Tokio worker (e.g. HTTP API → sync command handler).
             // block_in_place frees the worker so block_on can poll the future.
-            tokio::task::block_in_place(|| self.rt.handle().block_on(fut))
+            tokio::task::block_in_place(|| self.inner().handle().block_on(fut))
         } else {
-            self.rt.block_on(fut)
+            self.inner().block_on(fut)
+        }
+    }
+}
+
+impl Drop for Runtime {
+    fn drop(&mut self) {
+        // Dropping a Tokio runtime from within an async context panics
+        // ("Cannot drop a runtime in a context where blocking is not allowed").
+        // In production the core runtime is dropped synchronously at shutdown, so
+        // this branch is not taken; it only triggers in async tests that own a
+        // Runtime. Offload the drop to a standalone thread in that case.
+        if let Some(rt) = self.rt.take() {
+            if tokio::runtime::Handle::try_current().is_ok() {
+                std::thread::spawn(move || drop(rt));
+            }
+            // Otherwise `rt` drops here, in a synchronous context, as before.
         }
     }
 }

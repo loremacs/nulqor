@@ -64,6 +64,14 @@ html.nulqor-startup-hidden.nulqor-startup-windowed
   background-color: #121216 !important;
 }
 
+/* Only clear fill color — never `background:` shorthand (it wipes grid background-image). */
+.nulqor-shell[data-window-mode="fullscreen"],
+.nulqor-shell[data-window-mode="fullscreen"] .desktop-canvas,
+.nulqor-shell[data-window-mode="fullscreen"] .desktop-grid,
+.nulqor-shell[data-window-mode="fullscreen"] .desktop-split {
+  background-color: transparent;
+}
+
 .nulqor-shell[data-window-mode="windowed"] {
   background: var(--windowed-shell-bg);
   pointer-events: auto;
@@ -798,6 +806,12 @@ html.nulqor-startup-hidden .nulqor-shell[data-window-mode="windowed"] {
   background-size: calc(var(--cell-size) + var(--grid-gap))
     calc(var(--cell-size) + var(--grid-gap));
   background-position: 0 0;
+}
+
+.nulqor-shell[data-window-mode="fullscreen"].show-grid .desktop-grid {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.16) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.16) 1px, transparent 1px);
 }
 
 .panel-tile-free {

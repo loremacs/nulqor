@@ -47,6 +47,7 @@ import {
 } from "./split-render";
 import type { BuiltInPreset, SplitCanvasState } from "./split-layout";
 import { BUILT_IN_PRESETS, defaultSplitState } from "./split-layout";
+import { mountAlwaysOnTopKeeper } from "./always-on-top-keeper";
 import { mountClickThrough } from "./click-through";
 import { mountMenuDockPreview } from "./menu-dock-preview";
 import { promptSaveLayout } from "./save-layout-dialog";
@@ -71,6 +72,7 @@ import {
 import {
   captureWindowFrame,
   DEFAULT_WINDOWED_FRAME,
+  primeNativeBackgroundForMode,
   syncWindowFrameToDisk,
 } from "./window-frame";
 import { mountWindowResize } from "./window-resize";
@@ -348,7 +350,11 @@ function trackPointerSession(
   document.addEventListener("pointercancel", end);
 }
 
-export async function initShell(): Promise<void> {
+export type ShellHandle = {
+  resyncWindowMode: () => Promise<void>;
+};
+
+export async function initShell(): Promise<ShellHandle> {
   const app = document.getElementById("app");
   if (!app) throw new Error("#app not found");
 
@@ -496,7 +502,22 @@ export async function initShell(): Promise<void> {
   applyShellCss(shellRoot, shell);
   setMenuDock(menuDock);
 
-  const clickThrough = mountClickThrough(false);
+  const applyAlwaysOnTop = async (on: boolean): Promise<void> => {
+    try {
+      await getCurrentWindow().setAlwaysOnTop(on);
+    } catch (err) {
+      console.warn("[host] setAlwaysOnTop failed:", err);
+    }
+  };
+
+  const topmostKeeper = mountAlwaysOnTopKeeper(
+    () => shell.always_on_top && windowMode === "fullscreen",
+    () => applyAlwaysOnTop(true),
+  );
+
+  const clickThrough = mountClickThrough(false, {
+    onPassThrough: () => topmostKeeper.reassertNow(),
+  });
   const windowResize = mountWindowResize(() => windowMode === "windowed");
   windowResize.setEnabled(windowMode === "windowed");
   const menuDockPreview = mountMenuDockPreview(shellRoot);
@@ -550,6 +571,7 @@ export async function initShell(): Promise<void> {
     if (mode === "windowed") {
       clickThrough.setEnabled(false);
       clickThrough.forceClickable();
+      void primeNativeBackgroundForMode("windowed");
       if (
         previous !== mode &&
         previous === "fullscreen" &&
@@ -562,8 +584,11 @@ export async function initShell(): Promise<void> {
         });
       }
     } else {
+      void primeNativeBackgroundForMode("fullscreen");
       clickThrough.setEnabled(shell.click_through);
     }
+
+    topmostKeeper.sync(shell.always_on_top && mode === "fullscreen");
 
     syncSettingsInputs();
     syncClickThrough();
@@ -592,15 +617,8 @@ export async function initShell(): Promise<void> {
     tileEl.classList.remove("panel-tile-dragging");
   };
 
-  const applyAlwaysOnTop = async (on: boolean): Promise<void> => {
-    try {
-      await getCurrentWindow().setAlwaysOnTop(on);
-    } catch (err) {
-      console.warn("[host] setAlwaysOnTop failed:", err);
-    }
-  };
-
   void applyAlwaysOnTop(shell.always_on_top);
+  topmostKeeper.sync(shell.always_on_top && windowMode === "fullscreen");
 
   let tiles: TileLayout[] = openPanelIds.map((id, i) =>
     clampTile(panelLayouts[id] ?? defaultTile(id, i, gridMetrics), gridMetrics),
@@ -1185,6 +1203,7 @@ export async function initShell(): Promise<void> {
       syncClickThrough();
     } else {
       void applyAlwaysOnTop(shell.always_on_top);
+      topmostKeeper.sync(shell.always_on_top && windowMode === "fullscreen");
     }
     persist();
   };
@@ -1739,4 +1758,14 @@ export async function initShell(): Promise<void> {
     const target = event.target as Element;
     if (!target.closest(".menu-group")) closeDropdowns();
   });
+
+  return {
+    resyncWindowMode: async () => {
+      await windowChrome.syncUi();
+      applyWindowModePolicy(
+        windowChrome.getWindowMode(),
+        windowChrome.getWindowMode(),
+      );
+    },
+  };
 }

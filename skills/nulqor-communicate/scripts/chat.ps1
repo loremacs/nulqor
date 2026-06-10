@@ -1,13 +1,13 @@
 <#
 .SYNOPSIS
-  Interact with a running Nulqor app over HTTP (port 8080).
+  Interact with a running Nulqor app over HTTP (port 8787).
 .DESCRIPTION
   Wrapper for the Phase 2 HTTP API (decisions/006). Use when the Tauri app is running
   (npm start). External agents must register an observer before sending messages.
 .PARAMETER Action
   health | ready | connect | select-model | models | register | send | transcript | catch-up | ack | observers
 .PARAMETER BaseUrl
-  API base URL. Default: http://127.0.0.1:8080 or NULQOR_API_URL env var.
+  API base URL. Default: http://127.0.0.1:8787 or NULQOR_API_URL env var.
 .PARAMETER Message
   Text for Action=send.
 .PARAMETER ObserverName
@@ -55,7 +55,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($BaseUrl)) {
-    $BaseUrl = if ($env:NULQOR_API_URL) { $env:NULQOR_API_URL.TrimEnd('/') } else { "http://127.0.0.1:8080" }
+    $BaseUrl = if ($env:NULQOR_API_URL) { $env:NULQOR_API_URL.TrimEnd('/') } else { "http://127.0.0.1:8787" }
 }
 
 function Invoke-NulqorGet {

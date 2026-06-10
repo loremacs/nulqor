@@ -11,6 +11,7 @@ Read this index before adding or editing rules. Keep entries in sync when rules 
 |---|---|
 | `current-date.md` | Injects `{{current_datetime}}` so the Subject model can answer temporal questions |
 | `stack-and-tooling.md` | Stack pins, verify commands, and code-location invariants for self-editing agents |
+| `engineering-guardrails.md` | Recurring correctness/perf traps: polling vs events, validation honesty, lock-across-IO, ports, loop cap, doc consistency |
 
 ## Adding a Rule
 

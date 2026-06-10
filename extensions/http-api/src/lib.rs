@@ -1,6 +1,8 @@
 //! HTTP + WebSocket API extension — Phase 2.3 (BUILD_PLAN §2.3, decisions/006 §1–3).
 //!
-//! Starts an axum HTTP server on port 8080 (configurable).
+//! Starts an axum HTTP server on port 8787 (override with the `NULQOR_PORT` env var).
+//! Note: 8080 is intentionally avoided because it collides with the conventional
+//! llama.cpp model-server default (see `provider-llamacpp`).
 //! Implements the exact endpoint surface from decisions/006 §1.
 //! WebSocket paths forward transcript events to connected clients.
 //! Observer/catch-up protocol per decisions/006 §3.
@@ -122,7 +124,15 @@ struct ApiState {
 // Extension
 // ---------------------------------------------------------------------------
 
-const DEFAULT_PORT: u16 = 8080;
+const DEFAULT_PORT: u16 = 8787;
+
+/// Resolve the listen port: `NULQOR_PORT` env override, else `DEFAULT_PORT`.
+fn resolve_port() -> u16 {
+    std::env::var("NULQOR_PORT")
+        .ok()
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(DEFAULT_PORT)
+}
 
 pub struct HttpApiExtension {
     manifest: ExtensionManifest,
@@ -154,6 +164,7 @@ impl Extension for HttpApiExtension {
 
         // Register http-api:status@1
         {
+            let port = resolve_port();
             let running = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let running_clone = running.clone();
             ctx.commands.register(
@@ -172,7 +183,7 @@ impl Extension for HttpApiExtension {
                 Arc::new(move |_| {
                     Ok(serde_json::json!({
                         "running": running_clone.load(std::sync::atomic::Ordering::SeqCst),
-                        "port": DEFAULT_PORT,
+                        "port": port,
                     }))
                 }),
             )?;
@@ -180,7 +191,7 @@ impl Extension for HttpApiExtension {
             // Start the server in a background task
             ctx.runtime.spawn_task(Duration::from_secs(u64::MAX), async move {
                 let app = build_router(api_state);
-                let addr = SocketAddr::from(([127, 0, 0, 1], DEFAULT_PORT));
+                let addr = SocketAddr::from(([127, 0, 0, 1], port));
                 eprintln!("[http-api] listening on http://{addr}");
                 let listener = match tokio::net::TcpListener::bind(addr).await {
                     Ok(l) => l,
@@ -604,6 +615,12 @@ mod tests {
             ws_tx,
         };
         build_router(api_state)
+    }
+
+    #[test]
+    fn default_port_avoids_model_server_collision() {
+        // 8080 is the conventional llama.cpp model-server port; the API must not share it.
+        assert_ne!(DEFAULT_PORT, 8080, "API default port must not collide with model servers");
     }
 
     #[tokio::test]

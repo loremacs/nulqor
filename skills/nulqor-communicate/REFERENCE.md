@@ -4,9 +4,9 @@ Loaded on demand. HTTP routes, MCP tools, bridge commands, and troubleshooting.
 
 ---
 
-## HTTP API — port 8080
+## HTTP API — port 8787
 
-Base URL: `NULQOR_API_URL` or `http://127.0.0.1:8080`.
+Base URL: `NULQOR_API_URL` or `http://127.0.0.1:8787`.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -67,7 +67,7 @@ Connect via `.cursor/mcp.json` with `cargo run --manifest-path tools/mcp-server/
 
 | Symptom | Fix |
 |---|---|
-| Connection refused :8080 | `npm start` |
+| Connection refused :8787 | `npm start` |
 | `ready` → `no_active_model` | Click **Disconnect** then **Connect** in chat-panel, or `chat.ps1 -Action connect` |
 | `ready` → `provider_unreachable` | Start LM Studio; load a model |
 | `ready` → `no_models_loaded` | Load a model in LM Studio, then `-Action connect` |

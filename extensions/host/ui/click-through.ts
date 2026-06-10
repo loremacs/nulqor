@@ -64,7 +64,15 @@ async function cursorClientCss(): Promise<{ x: number; y: number } | null> {
   }
 }
 
-export function mountClickThrough(initialEnabled: boolean): ClickThroughHandle {
+export type ClickThroughOptions = {
+  /** Fired when OS pass-through turns on (click went to the desktop/app behind). */
+  onPassThrough?: () => void;
+};
+
+export function mountClickThrough(
+  initialEnabled: boolean,
+  options: ClickThroughOptions = {},
+): ClickThroughHandle {
   const win = getCurrentWindow();
   let enabled = initialEnabled;
   let disposed = false;
@@ -73,12 +81,28 @@ export function mountClickThrough(initialEnabled: boolean): ClickThroughHandle {
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let pollFailures = 0;
   let windowFocused = true;
+  // Window metrics change only on resize / DPI change. Cache them so the
+  // high-frequency poll does not make an innerSize + scaleFactor IPC round-trip
+  // every tick (cursor position is the only value that must be polled live).
+  let cachedInner: Awaited<ReturnType<typeof win.innerSize>> | null = null;
+  let cachedScale = 1;
+  const metricsUnlisten: Array<() => void> = [];
+
+  const refreshMetrics = async (): Promise<void> => {
+    try {
+      cachedInner = await win.innerSize();
+      cachedScale = await win.scaleFactor();
+    } catch {
+      // keep previous values on failure
+    }
+  };
 
   const setIgnoring = async (next: boolean): Promise<void> => {
     if (disposed || ignoring === next) return;
     ignoring = next;
     try {
       await win.setIgnoreCursorEvents(next);
+      if (next) options.onPassThrough?.();
     } catch (err) {
       console.warn("[click-through] setIgnoreCursorEvents failed:", err);
     }
@@ -161,17 +185,18 @@ export function mountClickThrough(initialEnabled: boolean): ClickThroughHandle {
 
     pollFailures = 0;
 
-    const inner = await win.innerSize();
-    const scale = await win.scaleFactor();
-    const logical = inner.toLogical(scale);
-    if (
-      pos.x < 0 ||
-      pos.y < 0 ||
-      pos.x > logical.width ||
-      pos.y > logical.height
-    ) {
-      await setIgnoring(true);
-      return;
+    if (!cachedInner) await refreshMetrics();
+    if (cachedInner) {
+      const logical = cachedInner.toLogical(cachedScale);
+      if (
+        pos.x < 0 ||
+        pos.y < 0 ||
+        pos.x > logical.width ||
+        pos.y > logical.height
+      ) {
+        await setIgnoring(true);
+        return;
+      }
     }
 
     await apply(pos.x, pos.y);
@@ -254,10 +279,28 @@ export function mountClickThrough(initialEnabled: boolean): ClickThroughHandle {
     disposed = true;
     stopPoll();
     focusUnlisten?.();
+    metricsUnlisten.forEach((u) => u());
+    metricsUnlisten.length = 0;
     document.removeEventListener("mousemove", onMouseMove);
     document.removeEventListener("pointerdown", onPointerDown, true);
     void ensureClickable().catch(() => {});
   };
+
+  void refreshMetrics();
+  void win
+    .onResized(() => {
+      void refreshMetrics();
+    })
+    .then((u) => {
+      metricsUnlisten.push(u);
+    });
+  void win
+    .onScaleChanged(() => {
+      void refreshMetrics();
+    })
+    .then((u) => {
+      metricsUnlisten.push(u);
+    });
 
   void win
     .onFocusChanged(({ payload: focused }) => {

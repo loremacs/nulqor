@@ -2,7 +2,7 @@
 //!
 //! Implements the Model Context Protocol (JSON-RPC 2.0 over stdio) and proxies
 //! the five observer tools to the Nulqor HTTP API running at NULQOR_API_URL
-//! (default: http://localhost:8080).
+//! (default: http://localhost:8787).
 //!
 //! Tools exposed:
 //!   register_observer  — join the shared transcript as an observer
@@ -160,7 +160,7 @@ fn tool_list() -> Value {
 // ---------------------------------------------------------------------------
 
 fn api_base() -> String {
-    std::env::var("NULQOR_API_URL").unwrap_or_else(|_| "http://localhost:8080".into())
+    std::env::var("NULQOR_API_URL").unwrap_or_else(|_| "http://localhost:8787".into())
 }
 
 fn http_get(path: &str) -> Result<Value, String> {

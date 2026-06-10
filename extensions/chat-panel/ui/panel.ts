@@ -1537,7 +1537,8 @@ async function waitForAssistantReply(
 
   while (Date.now() < deadline) {
     await sleep(400);
-    transcriptHash = "";
+    // Keep the transcript hash so loadTranscript only re-renders when the
+    // server transcript actually changes (e.g. the assistant turn lands).
     await loadTranscript();
     if (
       messages.length > beforeCount &&
@@ -2152,6 +2153,9 @@ export function mount(container: HTMLElement): void {
     await refreshAll(true);
     await updateTokenBudget();
     scrollTranscriptToBottom("auto");
-    pollTimer = setInterval(() => void refreshAll(), 2000);
+    pollTimer = setInterval(() => {
+      // Skip work while the window/panel is hidden; resume on visibility.
+      if (document.visibilityState === "visible") void refreshAll();
+    }, 2000);
   })();
 }

@@ -1,11 +1,9 @@
 //! Persisted window frame for cold-start geometry (read in setup before show).
 
 use serde::{Deserialize, Serialize};
-use tauri::window::Color;
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, WebviewWindow};
 
 const SNAP_ABS_TOLERANCE_PX: i32 = 28;
-const WINDOWED_BG: Color = Color(18, 18, 22, 255);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -170,8 +168,25 @@ pub fn apply(window: &WebviewWindow, frame: &WindowFramePersist) -> Result<(), S
     let is_fullscreen = window.is_fullscreen().map_err(|e| e.to_string())?;
 
     if frame.mode == "fullscreen" {
-        if !is_fullscreen {
-            window.set_resizable(false).map_err(|e| e.to_string())?;
+        if is_fullscreen {
+            window
+                .set_fullscreen(false)
+                .map_err(|e| e.to_string())?;
+        }
+        window.set_resizable(false).map_err(|e| e.to_string())?;
+        if let Some(monitor) = resolve_monitor(window, frame.monitor_name.as_deref())? {
+            let scale = window.scale_factor().map_err(|e| e.to_string())?;
+            let wa = work_area(&monitor);
+            window
+                .set_size(LogicalSize::new(
+                    wa.width as f64 / scale,
+                    wa.height as f64 / scale,
+                ))
+                .map_err(|e| e.to_string())?;
+            window
+                .set_position(PhysicalPosition::new(wa.x, wa.y))
+                .map_err(|e| e.to_string())?;
+        } else {
             window.set_fullscreen(true).map_err(|e| e.to_string())?;
         }
         return Ok(());
@@ -194,8 +209,6 @@ pub fn apply(window: &WebviewWindow, frame: &WindowFramePersist) -> Result<(), S
     } else {
         window.center().map_err(|e| e.to_string())?;
     }
-
-    let _ = window.set_background_color(Some(WINDOWED_BG));
 
     Ok(())
 }

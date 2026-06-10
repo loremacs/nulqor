@@ -5,7 +5,7 @@
 //!   register_observer, catch_up, ack_observer, send_message, list_observers
 //!
 //! MCP transport: stdio (Cursor/Windsurf IDE config).
-//! The bridge reads NULQOR_API_URL from the environment (default: http://localhost:8080).
+//! The bridge reads NULQOR_API_URL from the environment (default: http://localhost:8787).
 //!
 //! This Rust extension registers the bridge activation command. The actual
 //! stdio MCP server binary is spawned as a sidecar (Phase 4+). For Phase 2,
@@ -30,7 +30,7 @@ impl McpBridgeExtension {
 
     fn api_url(caps: &Capabilities, ext_id: &str) -> Result<String, CoreError> {
         let url = std::env::var("NULQOR_API_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".into());
+            .unwrap_or_else(|_| "http://localhost:8787".into());
         caps.check_http_allowed(ext_id, &url)?;
         Ok(url)
     }
@@ -177,7 +177,7 @@ impl Extension for McpBridgeExtension {
         }
 
         eprintln!("[mcp-bridge] activated — API URL: {}",
-            std::env::var("NULQOR_API_URL").unwrap_or_else(|_| "http://localhost:8080".into())
+            std::env::var("NULQOR_API_URL").unwrap_or_else(|_| "http://localhost:8787".into())
         );
         Ok(())
     }

@@ -11,16 +11,23 @@
 param(
     [string]$Root = ".",
     [switch]$Quiet,
-    [switch]$SkipLint
+    [switch]$SkipLint,
+    [switch]$Strict
 )
 
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path $Root).Path
 $failures = [System.Collections.Generic.List[string]]::new()
+$warnings = [System.Collections.Generic.List[string]]::new()
 
 function Add-Fail {
     param([string]$Message)
     $failures.Add($Message) | Out-Null
+}
+
+function Add-Warn {
+    param([string]$Message)
+    $warnings.Add($Message) | Out-Null
 }
 
 function IdToModName {
@@ -294,7 +301,94 @@ if (-not $SkipLint) {
     }
 }
 
+# ── 8. Doc consistency (drift guard) ─────────────────────────────────────────
+
+$tasksPath = Join-Path $Root "TASKS.md"
+$phasesPath = Join-Path $Root "docs/PHASES.md"
+if ((Test-Path $tasksPath) -and (Test-Path $phasesPath)) {
+    $phasesRaw = Get-Content -Raw -Path $phasesPath
+    $tasksRaw = Get-Content -Raw -Path $tasksPath
+    $phasesCurrent = $null
+    if ($phasesRaw -match 'Current:\s*Phase\s*(\d+)') { $phasesCurrent = [int]$Matches[1] }
+    $maxDonePhase = 0
+    foreach ($m in [regex]::Matches($tasksRaw, '(?m)^\|\s*(\d+)\.\d+\s*\|.*\b(Done|Partial)\b')) {
+        $p = [int]$m.Groups[1].Value
+        if ($p -gt $maxDonePhase) { $maxDonePhase = $p }
+    }
+    if (($null -ne $phasesCurrent) -and ($maxDonePhase -gt $phasesCurrent)) {
+        Add-Warn "docs/PHASES.md says 'Current: Phase $phasesCurrent' but TASKS.md shows Done/Partial work through Phase $maxDonePhase (doc drift)"
+    }
+}
+
+$goalPath = Join-Path $Root "docs/GOAL.md"
+$decPath = Join-Path $Root "docs/decisions/001-frozen-core.md"
+if ((Test-Path $goalPath) -and (Test-Path $decPath)) {
+    $goalRaw = Get-Content -Raw -Path $goalPath
+    $decRaw = Get-Content -Raw -Path $decPath
+    $goalWord = $null; $decWord = $null
+    if ($goalRaw -match '(?i)\b([a-z]+)-responsibility core') { $goalWord = $Matches[1].ToLower() }
+    if ($decRaw -match '(?i)frozen at (\w+) responsibilit') { $decWord = $Matches[1].ToLower() }
+    if ($goalWord -and $decWord -and ($goalWord -ne $decWord)) {
+        Add-Warn "core-responsibility count drift: GOAL.md says '$goalWord-responsibility' but decisions/001 says '$decWord responsibilities'"
+    }
+}
+
+# ── 9. Port uniqueness (collision guard) ─────────────────────────────────────
+
+if (Test-Path $extensionsDir) {
+    $portMap = @{}
+    Get-ChildItem -Path $extensionsDir -Directory | ForEach-Object {
+        $extId = $_.Name
+        # provider-router catalogs other backends; mcp-bridge/mcp-server are API clients (no listener).
+        # Their port references are legitimate, not collisions.
+        if ($extId -eq "provider-router" -or $extId -eq "mcp-bridge") { return }
+        $ports = [System.Collections.Generic.HashSet[string]]::new()
+        Get-ChildItem -Path $_.FullName -Recurse -File -Include *.rs, *.md, *.toml -ErrorAction SilentlyContinue | ForEach-Object {
+            $c = Get-Content -Raw -Path $_.FullName
+            foreach ($pm in [regex]::Matches($c, 'localhost:(\d{2,5})')) { [void]$ports.Add($pm.Groups[1].Value) }
+            foreach ($pm in [regex]::Matches($c, '(?i)DEFAULT_PORT[^=\n]*=\s*(\d{2,5})')) { [void]$ports.Add($pm.Groups[1].Value) }
+        }
+        foreach ($p in $ports) {
+            if (-not $portMap.ContainsKey($p)) { $portMap[$p] = [System.Collections.Generic.List[string]]::new() }
+            $portMap[$p].Add($extId) | Out-Null
+        }
+    }
+    foreach ($kv in $portMap.GetEnumerator()) {
+        if ($kv.Value.Count -gt 1) {
+            Add-Warn "port $($kv.Key) shared by extensions: $($kv.Value -join ', ') - verify no listening collision (see rules/engineering-guardrails.md)"
+        }
+    }
+}
+
+# ── 10. Polling inventory (prefer event push) ────────────────────────────────
+
+if (Test-Path $extensionsDir) {
+    $pollFiles = [System.Collections.Generic.List[string]]::new()
+    Get-ChildItem -Path $extensionsDir -Recurse -File -Filter *.ts -ErrorAction SilentlyContinue | ForEach-Object {
+        $c = Get-Content -Raw -Path $_.FullName
+        $count = ([regex]::Matches($c, 'setInterval\s*\(')).Count
+        if ($count -gt 0) {
+            $rel = $_.FullName.Substring($Root.Length + 1) -replace '\\', '/'
+            $pollFiles.Add("$rel ($count setInterval)") | Out-Null
+        }
+    }
+    if ($pollFiles.Count -gt 0) {
+        Add-Warn "polling sites (prefer event push - rules/engineering-guardrails.md): $($pollFiles -join '; ')"
+    }
+}
+
 # ── Result ──────────────────────────────────────────────────────────────────
+
+if ($Strict) {
+    foreach ($w in $warnings) { Add-Fail $w }
+    $warnings.Clear()
+}
+
+if ($warnings.Count -gt 0) {
+    foreach ($w in $warnings) {
+        Write-Host "WARN: $w"
+    }
+}
 
 if ($failures.Count -gt 0) {
     foreach ($f in $failures) {

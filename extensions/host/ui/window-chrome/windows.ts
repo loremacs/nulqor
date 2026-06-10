@@ -1,6 +1,11 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import { applyWindowedFrame, getWindowedRestoreTarget } from "../window-frame";
+import {
+  applyOverlayFrame,
+  applyWindowedFrame,
+  getWindowedRestoreTarget,
+  isOverlayFrameActive,
+} from "../window-frame";
 import type {
   WindowChromeContext,
   WindowChromeHandle,
@@ -115,13 +120,19 @@ function mount(ctx: WindowChromeContext): WindowChromeHandle {
   };
 
   const syncUi = async (): Promise<void> => {
-    const fullscreen = await getCurrentWindow().isFullscreen();
-    setWindowMode(fullscreen ? "fullscreen" : "windowed");
-    restoreBtn.title = fullscreen ? UI.restoreButtonTitleFullscreen : UI.restoreButtonTitleWindowed;
-    restoreBtn.textContent = fullscreen ? UI.restoreButtonLabelFullscreen : UI.restoreButtonLabelWindowed;
+    const overlay = await isOverlayFrameActive(getWindowFrame()?.monitorName);
+    setWindowMode(overlay ? "fullscreen" : "windowed");
+    restoreBtn.title = overlay
+      ? UI.restoreButtonTitleFullscreen
+      : UI.restoreButtonTitleWindowed;
+    restoreBtn.textContent = overlay
+      ? UI.restoreButtonLabelFullscreen
+      : UI.restoreButtonLabelWindowed;
     const dragRegion = menuBar.querySelector<HTMLElement>(".menu-bar-drag");
     if (dragRegion) {
-      dragRegion.title = fullscreen ? UI.brandTitleFullscreen : UI.brandTitleWindowed;
+      dragRegion.title = overlay
+        ? UI.brandTitleFullscreen
+        : UI.brandTitleWindowed;
     }
   };
 
@@ -129,16 +140,16 @@ function mount(ctx: WindowChromeContext): WindowChromeHandle {
     if (togglingFullscreen) return;
     togglingFullscreen = true;
     try {
-      const win = getCurrentWindow();
-      const fullscreen = await win.isFullscreen();
-      if (fullscreen) {
+      const inOverlay = await isOverlayFrameActive(
+        getWindowFrame()?.monitorName,
+      );
+      if (inOverlay) {
         setWindowMode("windowed");
         await applyWindowedFrame(getWindowedRestoreTarget(getWindowFrame()));
       } else {
         await refreshWindowFrame();
         setWindowMode("fullscreen");
-        await win.setFullscreen(true);
-        await win.setResizable(false);
+        await applyOverlayFrame(getWindowFrame()?.monitorName);
       }
       await syncUi();
       await refreshWindowFrame();

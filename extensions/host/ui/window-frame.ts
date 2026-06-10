@@ -33,7 +33,9 @@ export const DEFAULT_WINDOWED_FRAME: WindowFrameState = {
 
 const POSITION_MATCH_TOLERANCE_PX = 28;
 const SIZE_MATCH_TOLERANCE_PX = 4;
-const WINDOWED_NATIVE_BG = { red: 18, green: 18, blue: 22, alpha: 255 };
+/** Overlay covers monitor work area — outer size can differ slightly from inner. */
+const OVERLAY_SIZE_TOLERANCE_PX = 48;
+// Windows ignores alpha in setBackgroundColor — never use it for overlay transparency.
 
 type ApplyGeometryOptions = {
   startup?: boolean;
@@ -198,12 +200,63 @@ async function windowFrameMatches(target: WindowFrameState): Promise<boolean> {
   );
 }
 
+/** True when the window covers the monitor work area (transparent overlay desk). */
+export async function isOverlayFrameActive(
+  monitorName?: string | null,
+): Promise<boolean> {
+  const win = getCurrentWindow();
+  if (await win.isFullscreen()) return true;
+
+  const monitor = await resolveMonitor(monitorName);
+  if (!monitor) return false;
+
+  const wa = monitorWorkArea(monitor);
+  const [pos, size] = await Promise.all([win.outerPosition(), win.outerSize()]);
+  const right = pos.x + size.width;
+  const bottom = pos.y + size.height;
+  const targetRight = wa.position.x + wa.size.width;
+  const targetBottom = wa.position.y + wa.size.height;
+
+  return (
+    Math.abs(pos.x - wa.position.x) <= POSITION_MATCH_TOLERANCE_PX &&
+    Math.abs(pos.y - wa.position.y) <= POSITION_MATCH_TOLERANCE_PX &&
+    Math.abs(right - targetRight) <= OVERLAY_SIZE_TOLERANCE_PX &&
+    Math.abs(bottom - targetBottom) <= OVERLAY_SIZE_TOLERANCE_PX
+  );
+}
+
+/** Borderless transparent overlay — avoids Windows WebView2 fullscreen opacity bugs. */
+export async function applyOverlayFrame(
+  monitorName?: string | null,
+): Promise<void> {
+  const win = getCurrentWindow();
+  if (await win.isFullscreen()) {
+    await win.setFullscreen(false);
+  }
+  await win.setResizable(false);
+
+  const monitor = await resolveMonitor(monitorName);
+  if (!monitor) {
+    await win.setFullscreen(true);
+    await nudgeWindowTransparency();
+    return;
+  }
+
+  const wa = monitorWorkArea(monitor);
+  const scale = await win.scaleFactor();
+  await win.setSize(
+    new LogicalSize(wa.size.width / scale, wa.size.height / scale),
+  );
+  await win.setPosition(wa.position);
+  await nudgeWindowTransparency();
+}
+
 async function frameMatchesApplied(
   frame: WindowFrameState | null,
 ): Promise<boolean> {
   const win = getCurrentWindow();
   if (!frame || frame.mode === "fullscreen") {
-    return await win.isFullscreen();
+    return isOverlayFrameActive(frame?.monitorName);
   }
 
   if (await win.isFullscreen()) return false;
@@ -227,10 +280,7 @@ async function frameMatchesApplied(
 async function applyFrameHidden(frame: WindowFrameState): Promise<void> {
   const win = getCurrentWindow();
   if (frame.mode === "fullscreen") {
-    if (!(await win.isFullscreen())) {
-      await win.setResizable(false);
-      await win.setFullscreen(true);
-    }
+    await applyOverlayFrame(frame.monitorName);
     return;
   }
 
@@ -238,6 +288,7 @@ async function applyFrameHidden(frame: WindowFrameState): Promise<void> {
     await win.setFullscreen(false);
   }
   await win.setResizable(true);
+  await primeWindowedNativeBackground();
 
   const geometry = await resolveTargetGeometry(getWindowedRestoreTarget(frame));
   await win.setSize(geometry.size);
@@ -250,21 +301,17 @@ async function applyFrameHidden(frame: WindowFrameState): Promise<void> {
 
 /** Default first-run overlay when nothing is persisted yet. */
 async function applyDefaultFirstRunFrame(): Promise<void> {
-  const win = getCurrentWindow();
-  if (!(await win.isFullscreen())) {
-    await win.setResizable(false);
-    await win.setFullscreen(true);
-  }
+  await applyOverlayFrame();
 }
 
 export async function captureWindowFrame(
   previous: WindowFrameState | null = null,
 ): Promise<WindowFrameState> {
   const win = getCurrentWindow();
-  const fullscreen = await win.isFullscreen();
+  const inOverlay = await isOverlayFrameActive(previous?.monitorName);
   const priorWindowed = getWindowedRestoreTarget(previous);
 
-  if (fullscreen) {
+  if (inOverlay) {
     return {
       mode: "fullscreen",
       width: priorWindowed.width,
@@ -332,23 +379,85 @@ export async function applyWindowedFrame(
 }
 
 export async function applyWindowFrame(frame: WindowFrameState): Promise<void> {
-  const win = getCurrentWindow();
   if (frame.mode === "fullscreen") {
-    if (!(await win.isFullscreen())) {
-      await win.setResizable(false);
-      await win.setFullscreen(true);
-    }
+    await applyOverlayFrame(frame.monitorName);
     return;
   }
 
   await applyWindowedGeometry(getWindowedRestoreTarget(frame));
+  await primeWindowedNativeBackground();
+}
+
+/** WebView2 on Windows only becomes transparent after a size change (alpha ignored). */
+async function nudgeWindowTransparency(): Promise<void> {
+  const win = getCurrentWindow();
+  const size = await win.innerSize();
+  const scale = await win.scaleFactor();
+  const logical = size.toLogical(scale);
+  if (logical.width < 4 || logical.height < 4) return;
+  await win.setSize(new LogicalSize(logical.width + 1, logical.height));
+  await waitForPaint(1);
+  await win.setSize(new LogicalSize(logical.width, logical.height));
+  await waitForPaint(1);
 }
 
 async function primeWindowedNativeBackground(): Promise<void> {
-  try {
-    await getCurrentWindow().setBackgroundColor(WINDOWED_NATIVE_BG);
-  } catch (err) {
-    console.warn("[window-frame] setBackgroundColor failed:", err);
+  // Windowed fill is CSS-only (#121216). Native setBackgroundColor cannot be
+  // cleared to transparent on Windows (alpha channel ignored).
+}
+
+async function primeFullscreenNativeBackground(): Promise<void> {
+  await nudgeWindowTransparency();
+}
+
+/** Match native window fill to overlay vs windowed shell. */
+export async function primeNativeBackgroundForMode(
+  mode: WindowFrameState["mode"],
+): Promise<void> {
+  if (mode === "windowed") {
+    await primeWindowedNativeBackground();
+  } else {
+    await primeFullscreenNativeBackground();
+  }
+}
+
+/**
+ * Apply OS geometry while the window is still hidden.
+ * Must run before {@link initShell} so syncUi sees the real fullscreen state.
+ */
+export async function applyStartupGeometry(
+  frame: WindowFrameState | null,
+): Promise<void> {
+  if (frame) {
+    if (!(await frameMatchesApplied(frame))) {
+      await applyFrameHidden(frame);
+    } else {
+      await primeNativeBackgroundForMode(frame.mode);
+    }
+  } else {
+    await applyDefaultFirstRunFrame();
+  }
+}
+
+/** Show the window and reveal the painted shell. */
+export async function showShellWindow(
+  frame: WindowFrameState | null,
+): Promise<void> {
+  const win = getCurrentWindow();
+  const windowed = frame?.mode === "windowed";
+
+  if (windowed) {
+    await waitForPaint(3);
+  }
+
+  if (!(await win.isVisible())) {
+    await win.show();
+  }
+
+  await waitForPaint(windowed ? 2 : 1);
+  markShellVisible();
+  if (!windowed) {
+    await nudgeWindowTransparency();
   }
 }
 
@@ -359,28 +468,8 @@ async function primeWindowedNativeBackground(): Promise<void> {
 export async function revealWindowFrame(
   frame: WindowFrameState | null,
 ): Promise<void> {
-  const win = getCurrentWindow();
-  const windowed = frame?.mode === "windowed";
-
-  if (frame) {
-    if (!(await frameMatchesApplied(frame))) {
-      await applyFrameHidden(frame);
-    }
-  } else {
-    await applyDefaultFirstRunFrame();
-  }
-
-  if (windowed) {
-    await primeWindowedNativeBackground();
-    await waitForPaint(3);
-  }
-
-  if (!(await win.isVisible())) {
-    await win.show();
-  }
-
-  await waitForPaint(windowed ? 2 : 1);
-  markShellVisible();
+  await applyStartupGeometry(frame);
+  await showShellWindow(frame);
 }
 
 /** @deprecated Use {@link revealWindowFrame} at startup. */

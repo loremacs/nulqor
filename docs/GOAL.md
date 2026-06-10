@@ -110,7 +110,7 @@ single most important discipline in the project.
 These are the ways this project dies. Each maps to a rule or a metric.
 
 1. **Core creep.** "Just this one useful thing in the core." The core stops being frozen; every
-   change risks everything. → Guard: the five-responsibility core list is fixed; additions need an ADR.
+   change risks everything. → Guard: the eight-responsibility core list is fixed; additions need an ADR.
 2. **Silent learning.** A fix lives in chat history, not an artifact. The same problem is solved
    twice. The loop quietly stops compounding. → Guard: capture discipline; watch for fixing anything twice.
 3. **Asking the Subject to build.** Routing platform-authoring tasks to the small model because it
