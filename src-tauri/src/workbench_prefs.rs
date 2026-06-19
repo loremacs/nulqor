@@ -82,7 +82,10 @@ pub fn prefs_path(root: &Path) -> PathBuf {
 }
 
 pub fn resolve_workspace_root() -> PathBuf {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let cwd = std::env::current_dir().unwrap_or_else(|e| {
+        eprintln!("[nulqor] current_dir() failed ({:?}), using manifest dir as workspace root", e);
+        PathBuf::from(".")
+    });
     if let Some(parent) = cwd.parent() {
         if parent.join("extensions").exists() || parent.join("AGENTS.md").exists() {
             return parent.to_path_buf();

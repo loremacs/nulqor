@@ -184,6 +184,14 @@ async function setWindowPosition(
   options?: ApplyGeometryOptions,
 ): Promise<void> {
   const win = getCurrentWindow();
+  const scale = window.devicePixelRatio || 1;
+  const screenW = window.screen.availWidth * scale;
+  const screenH = window.screen.availHeight * scale;
+  const x = position.x;
+  const y = position.y;
+  if (!(x >= 0 && y >= 0 && x < screenW && y < screenH)) {
+    return;
+  }
   await win.setPosition(position);
   if (options?.startup) {
     await win.setPosition(position);

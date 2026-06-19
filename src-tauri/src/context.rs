@@ -60,7 +60,7 @@ impl ConfigStore for InMemoryConfigStore {
         Ok(self
             .data
             .read()
-            .unwrap()
+            .unwrap_or_else(|p| p.into_inner())
             .get(&k)
             .cloned()
             .unwrap_or(serde_json::Value::Null))
@@ -68,7 +68,7 @@ impl ConfigStore for InMemoryConfigStore {
 
     fn set(&self, ext_id: &str, key: &str, value: serde_json::Value) -> Result<(), CoreError> {
         let k = Self::config_key(ext_id, key);
-        self.data.write().unwrap().insert(k, value);
+        self.data.write().unwrap_or_else(|p| p.into_inner()).insert(k, value);
         Ok(())
     }
 }

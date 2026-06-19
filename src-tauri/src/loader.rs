@@ -100,7 +100,9 @@ impl Loader {
             let (_, manifest) = manifests
                 .iter()
                 .find(|(_, m)| m.id == id)
-                .expect("id from topo_sort must exist in manifests");
+                .ok_or_else(|| CoreError::ExtensionNotFound(format!(
+                    "internal error: topo_sort produced id '{id}' not present in manifests"
+                )))?;
 
             let factory = self.factories.get(&id).ok_or_else(|| {
                 CoreError::ExtensionNotFound(format!(

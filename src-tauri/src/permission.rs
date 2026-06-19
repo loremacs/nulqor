@@ -25,7 +25,7 @@ impl PermissionGate {
 
     /// Install a confirm hook. Called for every `destructive` action.
     pub fn set_confirm_hook(&self, hook: ConfirmHook) {
-        *self.confirm_hook.write().unwrap() = Some(hook);
+        *self.confirm_hook.write().unwrap_or_else(|p| p.into_inner()) = Some(hook);
     }
 
     /// Check whether `caller` may perform an action needing `needed` on `what`.
@@ -40,7 +40,7 @@ impl PermissionGate {
             }
 
             Permission::Destructive => {
-                let hook = self.confirm_hook.read().unwrap();
+                let hook = self.confirm_hook.read().map_err(|_| CoreError::Io("permission gate lock poisoned".into()))?;
                 match hook.as_ref() {
                     Some(f) if f(what) => Ok(()),
                     Some(_) => Err(CoreError::PermissionDenied {

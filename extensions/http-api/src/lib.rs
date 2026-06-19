@@ -229,7 +229,7 @@ fn wire_transcript_events(
             let msg = ev.payload["message"].clone();
             let ws_event = serde_json::json!({ "type": "message_added", "message": msg.clone() });
             let _ = tx.send(ws_event);
-            obs.write().unwrap().append_message_added(msg);
+            obs.write().unwrap_or_else(|p| p.into_inner()).append_message_added(msg);
         }),
     );
 
@@ -428,7 +428,7 @@ async fn register_observer(
     let (out_name, last_ack_seq, pending) = {
         let mut obs = s.observers.write().unwrap();
         let o = obs.register(&name).clone();
-        let pending = obs.log.len() as u64 - o.last_ack_seq;
+        let pending = (obs.log.len() as u64).saturating_sub(o.last_ack_seq);
         (o.name.clone(), o.last_ack_seq, pending)
     };
     Json(serde_json::json!({
@@ -444,7 +444,7 @@ async fn list_observers(AxumState(s): AxumState<ApiState>) -> Json<serde_json::V
         obs.observers
             .values()
             .map(|o| {
-                let pending = obs.log.len() as u64 - o.last_ack_seq;
+                let pending = (obs.log.len() as u64).saturating_sub(o.last_ack_seq);
                 serde_json::json!({ "name": o.name, "last_ack_seq": o.last_ack_seq, "pending_count": pending })
             })
             .collect::<Vec<_>>()

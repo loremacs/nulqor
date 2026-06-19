@@ -220,7 +220,7 @@ mod tests {
             "nulqor-startup-test-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or(std::time::Duration::ZERO)
                 .subsec_nanos()
         ))
     }

@@ -38,13 +38,20 @@ impl EventBus {
 
     /// Publish an event. Wakes only subscribers whose pattern matches `ev.id`.
     pub fn publish(&self, ev: NamespacedEvent) -> Result<(), CoreError> {
-        let subs = self.subs.read().unwrap();
-        if let Some(entries) = subs.get(&ev.id.namespace) {
-            for entry in entries {
-                if entry.pattern.matches(&ev.id) {
-                    (entry.handler)(&ev);
-                }
-            }
+        let handlers: Vec<Arc<dyn Fn(&NamespacedEvent) + Send + Sync>> = {
+            let subs = self.subs.read().unwrap_or_else(|e| e.into_inner());
+            subs.get(&ev.id.namespace)
+                .map(|entries| {
+                    entries
+                        .iter()
+                        .filter(|entry| entry.pattern.matches(&ev.id))
+                        .map(|entry| Arc::clone(&entry.handler))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        for handler in handlers {
+            handler(&ev);
         }
         Ok(())
     }
@@ -57,14 +64,14 @@ impl EventBus {
     ) -> SubscriptionId {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let entry = Entry { id, pattern: pattern.clone(), handler };
-        let mut subs = self.subs.write().unwrap();
+        let mut subs = self.subs.write().unwrap_or_else(|e| e.into_inner());
         subs.entry(pattern.namespace.clone()).or_default().push(entry);
         SubscriptionId(id)
     }
 
     /// Cancel a subscription by the id returned from `subscribe`.
     pub fn unsubscribe(&self, sub_id: SubscriptionId) {
-        let mut subs = self.subs.write().unwrap();
+        let mut subs = self.subs.write().unwrap_or_else(|e| e.into_inner());
         for entries in subs.values_mut() {
             entries.retain(|e| e.id != sub_id.0);
         }
@@ -75,7 +82,7 @@ impl EventBus {
     fn subscriber_count(&self, namespace: &str) -> usize {
         self.subs
             .read()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .get(namespace)
             .map(|v| v.len())
             .unwrap_or(0)

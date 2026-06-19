@@ -591,10 +591,6 @@ body {
   display: none !important;
 }
 
-.chat-panel-body .chat-layout {
-  position: relative;
-}
-
 .fork-dialog {
   width: min(720px, 100%);
   max-height: 85%;
@@ -957,6 +953,7 @@ body {
 #token-budget {
   font-size: 0.72rem;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 .transcript {
@@ -1312,6 +1309,9 @@ button {
   font-size: 0.8rem;
   font-weight: 500;
   white-space: nowrap;
+}
+
+.input-bar button {
   align-self: flex-end;
 }
 
@@ -1355,7 +1355,4 @@ button:active {
 .muted {
   color: var(--muted);
   font-size: 0.75rem;
-}
-#token-budget {
-  margin-left: auto;
 }

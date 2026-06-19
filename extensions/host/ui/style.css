@@ -150,6 +150,7 @@ html.nulqor-startup-hidden .nulqor-shell[data-window-mode="windowed"] {
 
 .nulqor-shell .menu-bar,
 .nulqor-shell .panel-tile,
+.nulqor-shell .panel-tile-free,
 .nulqor-shell .menu-dropdown.is-open,
 .nulqor-shell .shell-modal-backdrop,
 .nulqor-shell .split-sash,
@@ -493,7 +494,7 @@ html.nulqor-startup-hidden .nulqor-shell[data-window-mode="windowed"] {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.36);
   flex-direction: column;
   gap: 0;
-  z-index: 10;
+  z-index: 1001;
   display: none;
   font-size: 13px;
   color: var(--menu-fg);
@@ -854,13 +855,6 @@ html.nulqor-startup-hidden .nulqor-shell[data-window-mode="windowed"] {
   bottom: 0;
 }
 
-.desktop-canvas {
-  position: fixed;
-  padding: 0;
-  pointer-events: none;
-  overflow: visible;
-}
-
 /* Grid lines live on ::before so they stop exactly at the active cell boundary.
    The parent fills the full desktop for panel dragging; the pseudo-element is
    sized to --grid-active-width/height so partial edge cells are never shown. */
@@ -1204,7 +1198,7 @@ html.nulqor-startup-hidden .nulqor-shell[data-window-mode="windowed"] {
 }
 
 .panel-tile-dragging {
-  z-index: 10;
+  z-index: 20;
   opacity: 0.65;
   cursor: grabbing !important;
   pointer-events: none;

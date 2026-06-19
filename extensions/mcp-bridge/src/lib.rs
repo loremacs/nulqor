@@ -11,7 +11,7 @@
 //! stdio MCP server binary is spawned as a sidecar (Phase 4+). For Phase 2,
 //! the bridge exposes the five tools as core commands callable by external agents.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::capability::Capabilities;
 use crate::context::{CoreContext, Extension};
@@ -93,8 +93,9 @@ impl Extension for McpBridgeExtension {
                         .as_str()
                         .ok_or_else(|| CoreError::Io("catch-up: observer_name required".into()))?;
                     let auto_ack = input["auto_ack"].as_bool().unwrap_or(false);
+                    let encoded_name = name.replace('%', "%25").replace(' ', "%20").replace('&', "%26").replace('=', "%3D").replace('+', "%2B").replace('#', "%23");
                     http_get_sync(&runtime, &format!(
-                        "{base}/observers/catch-up?observer={name}&auto_ack={auto_ack}"
+                        "{base}/observers/catch-up?observer={encoded_name}&auto_ack={auto_ack}"
                     ))
                 }),
             )?;
@@ -187,15 +188,35 @@ impl Extension for McpBridgeExtension {
 // Sync HTTP helpers (block_in_place over reqwest)
 // ---------------------------------------------------------------------------
 
+/// Shared HTTP client with a 5 s connect timeout and 30 s read/total timeout.
+/// Built once and reused across all calls; avoids per-request client construction
+/// and ensures requests do not block indefinitely when the API is unreachable.
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn shared_client() -> &'static reqwest::Client {
+    HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .expect("failed to build MCP-bridge HTTP client")
+    })
+}
+
 fn http_get_sync(runtime: &Runtime, url: &str) -> Result<serde_json::Value, CoreError> {
     let url = url.to_owned();
     runtime.block_on_compat(async move {
-        let client = reqwest::Client::new();
+        let client = shared_client();
         let resp = client
             .get(&url)
             .send()
             .await
             .map_err(|e| CoreError::Io(format!("GET {url}: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(CoreError::Io(format!("HTTP {status}: {body}").into()));
+        }
         resp.json::<serde_json::Value>()
             .await
             .map_err(|e| CoreError::Io(format!("GET {url} parse: {e}")))
@@ -205,13 +226,18 @@ fn http_get_sync(runtime: &Runtime, url: &str) -> Result<serde_json::Value, Core
 fn http_post_sync(runtime: &Runtime, url: &str, body: serde_json::Value) -> Result<serde_json::Value, CoreError> {
     let url = url.to_owned();
     runtime.block_on_compat(async move {
-        let client = reqwest::Client::new();
+        let client = shared_client();
         let resp = client
             .post(&url)
             .json(&body)
             .send()
             .await
             .map_err(|e| CoreError::Io(format!("POST {url}: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(CoreError::Io(format!("HTTP {status}: {body}").into()));
+        }
         resp.json::<serde_json::Value>()
             .await
             .map_err(|e| CoreError::Io(format!("POST {url} parse: {e}")))

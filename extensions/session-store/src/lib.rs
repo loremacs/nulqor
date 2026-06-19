@@ -165,7 +165,7 @@ impl Extension for SessionStoreExtension {
         self.paths.ensure_dirs().map_err(io_err)?;
 
         let session_id = self.ensure_active_session()?;
-        *self.active_id.write().unwrap() = session_id.clone();
+        *self.active_id.write().map_err(|_| CoreError::Io("lock poisoned".into()))? = session_id.clone();
 
         let messages = read_session_messages(&self.paths, &session_id)?;
         rebuild_rail_from_messages(&self.paths, &session_id, &messages)?;
@@ -238,7 +238,7 @@ impl Extension for SessionStoreExtension {
             &ctx.commands,
         )?;
         register_branch_list(self.paths.clone(), self.active_id.clone(), &ctx.commands)?;
-        register_branch_open(self.paths.clone(), &ctx.commands)?;
+        register_branch_open(self.paths.clone(), self.active_id.clone(), &ctx.commands)?;
 
         eprintln!("[session-store] active session: {session_id}");
         Ok(())
@@ -281,7 +281,7 @@ impl SessionStoreExtension {
 
 fn new_session_id() -> String {
     let stamp = Utc::now().format("%Y-%m-%d").to_string();
-    let short = &Uuid::new_v4().to_string()[..8];
+    let short = Uuid::new_v4().to_string().chars().take(8).collect::<String>();
     format!("{stamp}-{short}")
 }
 
@@ -382,7 +382,7 @@ fn on_message_added(
 
 fn message_preview(msg: &serde_json::Value) -> String {
     let content = msg["content"].as_str().unwrap_or("");
-    let one_line: String = content.split_whitespace().collect();
+    let one_line: String = content.split_whitespace().collect::<Vec<_>>().join(" ");
     if one_line.len() <= 48 {
         one_line
     } else {
@@ -507,7 +507,7 @@ fn create_empty_session(
     let now = Utc::now();
     upsert_catalog_entry(paths, &id, title, "", now, now)?;
     set_active_session(paths, &id)?;
-    *active.write().unwrap() = id.clone();
+    *active.write().map_err(|_| CoreError::Io("lock poisoned".into()))? = id.clone();
     hydrate_transcript(cmds, &[])?;
     Ok(id)
 }
@@ -722,7 +722,7 @@ fn register_create(
             let now = Utc::now();
             upsert_catalog_entry(&paths, &id, &title, "", now, now)?;
             set_active_session(&paths, &id)?;
-            *active.write().unwrap() = id.clone();
+            *active.write().map_err(|_| CoreError::Io("lock poisoned".into()))? = id.clone();
             hydrate_transcript(&cmds_for_handler, &[])?;
             Ok(serde_json::json!({ "id": id }))
         }),
@@ -764,7 +764,7 @@ fn register_load(
             }
             ensure_session_materialized(&paths, &session_id)?;
             set_active_session(&paths, &session_id)?;
-            *active.write().unwrap() = session_id.clone();
+            *active.write().map_err(|_| CoreError::Io("lock poisoned".into()))? = session_id.clone();
             let messages = read_session_messages(&paths, &session_id)?;
             rebuild_rail_from_messages(&paths, &session_id, &messages)?;
             hydrate_transcript(&cmds_for_handler, &messages)?;
@@ -894,7 +894,7 @@ fn register_delete(
                     let id = next.id.clone();
                     ensure_session_materialized(&paths, &id)?;
                     set_active_session(&paths, &id)?;
-                    *active.write().unwrap() = id.clone();
+                    *active.write().map_err(|_| CoreError::Io("lock poisoned".into()))? = id.clone();
                     let messages = read_session_messages(&paths, &id)?;
                     rebuild_rail_from_messages(&paths, &id, &messages)?;
                     hydrate_transcript(&cmds_for_handler, &messages)?;
@@ -903,7 +903,7 @@ fn register_delete(
                     create_empty_session(&paths, &active, &cmds_for_handler, "New chat")?
                 }
             } else {
-                active.read().unwrap().clone()
+                active.read().map_err(|_| CoreError::Io("lock poisoned".into()))?.clone()
             };
 
             Ok(serde_json::json!({
@@ -976,7 +976,7 @@ fn register_edit_message(
                 let branch_dir = paths.branch_dir(&session_id);
                 std::fs::create_dir_all(&branch_dir).map_err(io_err)?;
                 let branch_path = branch_dir.join(&fork_file_name);
-                rewrite_session_file_paths(&branch_path, &messages)?;
+                rewrite_session_file_paths(&branch_path, &messages[..=idx])?;
                 let branch_rel = format!(
                     "human/branches/{session_id}/{fork_file_name}"
                 );
@@ -1133,6 +1133,7 @@ fn register_branch_list(
 
 fn register_branch_open(
     paths: StorePaths,
+    active: Arc<RwLock<String>>,
     cmds: &Arc<crate::commands::CommandRegistry>,
 ) -> Result<(), CoreError> {
     let _ = cmds;
@@ -1155,8 +1156,8 @@ fn register_branch_open(
                 .ok_or_else(|| CoreError::Io("open: fork_id required".into()))?
                 .to_owned();
 
-            let state: StoreState = read_json(&paths.state)?;
-            let index_path = paths.fork_index_file(&state.active_session_id);
+            let sid = active.read().unwrap().clone();
+            let index_path = paths.fork_index_file(&sid);
             let index: ForkIndex = read_json(&index_path)?;
             let fork = index
                 .forks

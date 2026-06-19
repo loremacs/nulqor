@@ -310,7 +310,9 @@ fn write_agent(root: &Path, name: &str, body: &str) -> Result<String, CoreError>
 
 fn reload_store(store: &Arc<RwLock<ContextStore>>) {
     let root = resolve_workspace_root();
-    *store.write().unwrap() = ContextStore::load_from(&root);
+    let data = ContextStore::load_from(&root);
+    let mut guard = store.write().unwrap_or_else(|p| p.into_inner());
+    *guard = data;
 }
 
 impl ContextStore {
@@ -539,7 +541,13 @@ fn parse_skill_frontmatter(content: &str) -> Option<SkillMeta> {
     let rest_start = end + stripped[end..].find('\n')? + 1;
     let body = stripped[rest_start..].trim_start_matches('\n').to_owned();
 
-    let front: Front = serde_yaml::from_str(front_yaml).ok()?;
+    let front: Front = match serde_yaml::from_str(front_yaml) {
+        Ok(f) => f,
+        Err(err) => {
+            eprintln!("Failed to parse skill frontmatter: {:?}", err);
+            return None;
+        }
+    };
     Some(SkillMeta {
         name: front.name,
         description: front.description,

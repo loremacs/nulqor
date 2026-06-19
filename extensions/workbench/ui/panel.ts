@@ -272,16 +272,24 @@ function renderShell(): void {
   wireFooter();
 }
 
+let footerAbort: AbortController | null = null;
+
 function wireFooter(): void {
+  footerAbort?.abort();
+  footerAbort = new AbortController();
   const saveBtn = rootEl?.querySelector<HTMLButtonElement>(".wb-save");
-  saveBtn?.addEventListener("click", () => void saveCurrent());
+  saveBtn?.addEventListener("click", () => void saveCurrent(), {
+    signal: footerAbort.signal,
+  });
 }
 
 async function refreshList(): Promise<void> {
   const listEl = el<HTMLElement>(".wb-list");
   const detailEl = el<HTMLElement>(".wb-detail");
   listEl.innerHTML = `<p class="wb-loading">Loading…</p>`;
-  detailEl.innerHTML = "";
+  if (!dirty) {
+    detailEl.innerHTML = "";
+  }
 
   try {
     if (activeTab === "extensions") {
@@ -592,16 +600,19 @@ function renderSkillEditor(form: SkillForm, rawBody: string, enabled = true): vo
 
   detailEl.querySelectorAll<HTMLButtonElement>(".wb-mode").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const mode = btn.dataset.mode as "form" | "raw";
-      if (mode === skillEditMode) return;
-      skillEditMode = mode;
-      if (mode === "raw") {
-        const currentForm = readSkillForm();
-        renderSkillEditor(currentForm, buildSkillBody(currentForm), enabled);
-      } else {
-        const raw = el<HTMLTextAreaElement>(".wb-raw").value;
-        renderSkillEditor(parseSkillBody(raw), raw, enabled);
-      }
+      void (async () => {
+        const mode = btn.dataset.mode as "form" | "raw";
+        if (mode === skillEditMode) return;
+        skillEditMode = mode;
+        await new Promise<void>((r) => requestAnimationFrame(() => r()));
+        if (mode === "raw") {
+          const currentForm = readSkillForm();
+          renderSkillEditor(currentForm, buildSkillBody(currentForm), enabled);
+        } else {
+          const raw = el<HTMLTextAreaElement>(".wb-raw").value;
+          renderSkillEditor(parseSkillBody(raw), raw, enabled);
+        }
+      })();
     });
   });
 
@@ -687,6 +698,7 @@ async function saveCurrent(): Promise<void> {
     setStatus("Enable this item before saving");
     return;
   }
+  const keyAtStart = selectedKey;
   setStatus("Saving…");
   try {
     if (activeTab === "skills") {
@@ -694,19 +706,21 @@ async function saveCurrent(): Promise<void> {
         skillEditMode === "raw"
           ? el<HTMLTextAreaElement>(".wb-raw").value
           : buildSkillBody(readSkillForm());
-      const name = readSkillForm().name || selectedKey;
+      const name = readSkillForm().name || keyAtStart;
       await coreInvoke("context-editor:save-skill@1", { name, body });
-      selectedKey = name;
+      if (selectedKey === keyAtStart) {
+        selectedKey = name;
+      }
     } else if (activeTab === "rules") {
       const body = el<HTMLTextAreaElement>(".wb-rule-body").value;
       await coreInvoke("context-editor:save-rule@1", {
-        filename: selectedKey,
+        filename: keyAtStart,
         body,
       });
     } else if (activeTab === "agents") {
       const body = el<HTMLTextAreaElement>(".wb-agent-body").value;
       await coreInvoke("context-editor:save-agent@1", {
-        name: selectedKey,
+        name: keyAtStart,
         body,
       });
     } else {

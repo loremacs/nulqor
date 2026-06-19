@@ -30,9 +30,11 @@ pub struct VersionManager {
 impl VersionManager {
     pub fn new() -> Self {
         Self {
-            core_version: Version::parse(CORE_VERSION).unwrap(),
+            core_version: Version::parse(CORE_VERSION)
+                .unwrap_or_else(|_| semver::Version::new(0, 0, 0)),
             api_versions: SUPPORTED_API_VERSIONS.iter().map(|s| s.to_string()).collect(),
-            schema_version: Version::parse(SCHEMA_VERSION).unwrap(),
+            schema_version: Version::parse(SCHEMA_VERSION)
+                .unwrap_or_else(|_| semver::Version::new(0, 0, 0)),
             contract_versions: RwLock::new(HashMap::new()),
             loaded_extensions: RwLock::new(HashMap::new()),
         }
@@ -81,7 +83,7 @@ impl VersionManager {
     /// Register that a contract version is live.
     /// Called by the command registry when an extension registers a command.
     pub fn register_contract(&self, base_key: &str, version: u32) {
-        let mut map = self.contract_versions.write().unwrap();
+        let mut map = self.contract_versions.write().unwrap_or_else(|p| p.into_inner());
         map.entry(base_key.to_string()).or_default().push(version);
     }
 
@@ -89,7 +91,7 @@ impl VersionManager {
     pub fn available_versions(&self, base_key: &str) -> Vec<u32> {
         self.contract_versions
             .read()
-            .unwrap()
+            .unwrap_or_else(|p| p.into_inner())
             .get(base_key)
             .cloned()
             .unwrap_or_default()
@@ -99,7 +101,7 @@ impl VersionManager {
     pub fn record_loaded(&self, ext_id: &str, version: Version) {
         self.loaded_extensions
             .write()
-            .unwrap()
+            .unwrap_or_else(|p| p.into_inner())
             .insert(ext_id.to_string(), version);
     }
 

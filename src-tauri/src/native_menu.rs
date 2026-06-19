@@ -143,16 +143,42 @@ pub fn update_menu_check(app: AppHandle, id: String, checked: bool) -> Result<()
     let Some(handles) = guard.as_ref() else { return Ok(()); };
 
     match id.as_str() {
-        "settings:click_through" => { let _ = handles.click_through.set_checked(checked); }
-        "settings:always_on_top" => { let _ = handles.always_on_top.set_checked(checked); }
-        "layout:grid"            => { let _ = handles.grid_mode.set_checked(checked); }
-        "layout:split"           => { let _ = handles.split_mode.set_checked(checked); }
-        "layout:snap"            => { let _ = handles.snap_enabled.set_checked(checked); }
-        "layout:show_grid"       => { let _ = handles.show_grid.set_checked(checked); }
+        "settings:click_through" => {
+            if let Err(e) = handles.click_through.set_checked(checked) {
+                eprintln!("[nulqor] native menu update failed: {:?}", e);
+            }
+        }
+        "settings:always_on_top" => {
+            if let Err(e) = handles.always_on_top.set_checked(checked) {
+                eprintln!("[nulqor] native menu update failed: {:?}", e);
+            }
+        }
+        "layout:grid" => {
+            if let Err(e) = handles.grid_mode.set_checked(checked) {
+                eprintln!("[nulqor] native menu update failed: {:?}", e);
+            }
+        }
+        "layout:split" => {
+            if let Err(e) = handles.split_mode.set_checked(checked) {
+                eprintln!("[nulqor] native menu update failed: {:?}", e);
+            }
+        }
+        "layout:snap" => {
+            if let Err(e) = handles.snap_enabled.set_checked(checked) {
+                eprintln!("[nulqor] native menu update failed: {:?}", e);
+            }
+        }
+        "layout:show_grid" => {
+            if let Err(e) = handles.show_grid.set_checked(checked) {
+                eprintln!("[nulqor] native menu update failed: {:?}", e);
+            }
+        }
         other if other.starts_with("apps:") => {
             let panel_id = &other["apps:".len()..];
             if let Some((_, item)) = handles.panel_checks.iter().find(|(pid, _)| pid == panel_id) {
-                let _ = item.set_checked(checked);
+                if let Err(e) = item.set_checked(checked) {
+                    eprintln!("[nulqor] native menu update failed: {:?}", e);
+                }
             }
         }
         _ => {}
@@ -167,6 +193,8 @@ pub fn update_window_mode_label(app: AppHandle, is_fullscreen: bool) -> Result<(
     let Ok(guard) = state.0.lock() else { return Ok(()); };
     let Some(handles) = guard.as_ref() else { return Ok(()); };
     let label = if is_fullscreen { "Enter Windowed Mode" } else { "Enter Fullscreen" };
-    let _ = handles.window_toggle.set_text(label);
+    if let Err(e) = handles.window_toggle.set_text(label) {
+        eprintln!("[nulqor] native menu update failed: {:?}", e);
+    }
     Ok(())
 }

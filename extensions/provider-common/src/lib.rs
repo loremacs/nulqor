@@ -88,7 +88,9 @@ pub fn model_ids_match(a: &str, b: &str) -> bool {
     if a == b {
         return true;
     }
-    if a.starts_with(b) || b.starts_with(a) {
+    if (a.starts_with(b) && a[b.len()..].starts_with(|c: char| !c.is_alphanumeric()))
+        || (b.starts_with(a) && b[a.len()..].starts_with(|c: char| !c.is_alphanumeric()))
+    {
         return true;
     }
     a.eq_ignore_ascii_case(b)
@@ -265,7 +267,7 @@ pub async fn stream_openai_chat(
 
         while let Some(nl) = buf.find('\n') {
             let line = buf[..nl].trim_end_matches('\r').to_owned();
-            buf = buf[nl + 1..].to_owned();
+            buf.drain(..nl + 1);
 
             let Some(data) = line.strip_prefix("data: ") else { continue };
             if data == "[DONE]" {

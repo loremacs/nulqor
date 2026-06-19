@@ -99,7 +99,7 @@ let sessions: SessionEntry[] = [];
 let activeSessionId = "";
 let transcriptHash = "";
 let pollTimer: ReturnType<typeof setInterval> | null = null;
-let providerActive: string | null | undefined = undefined;
+let providerActive: string | null = null;
 let providerConnected = false;
 let nulqorLoadedActive = false;
 let catalogModels: string[] = [];
@@ -114,6 +114,7 @@ let pendingDeleteSessionId: string | null = null;
 let pinTranscriptScroll = true;
 let awaitingAssistant = false;
 const openReasoningIds = new Set<string>();
+let mountGeneration = 0;
 const SCROLL_PIN_THRESHOLD = 64;
 const MAP_VISIBLE_STORAGE_KEY = "nulqor.chat-panel.map-visible";
 const SESSIONS_VISIBLE_STORAGE_KEY = "nulqor.chat-panel.sessions-visible";
@@ -140,7 +141,8 @@ function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function formatTime(iso: string): string {
@@ -229,9 +231,11 @@ function scrollTranscriptToBottom(behavior: ScrollBehavior = "smooth"): void {
 
 function wireTranscriptScroll(): void {
   const list = el<HTMLDivElement>("#transcript");
+  const gen = mountGeneration;
   list.addEventListener(
     "scroll",
     () => {
+      if (mountGeneration !== gen) return;
       pinTranscriptScroll = isTranscriptAtBottom(list);
     },
     { passive: true },
@@ -450,6 +454,8 @@ async function refreshAll(forceTranscriptScroll = false): Promise<void> {
       loadSessions(),
     ]);
   } finally {
+    // Always clear the flag so a stale in-flight from a previous mount does not
+    // block a fresh mount's refresh cycle.
     refreshInFlight = false;
   }
 }
@@ -866,7 +872,7 @@ function renderRail(): void {
 function jumpToMessage(messageId: string): void {
   const list = el<HTMLDivElement>("#transcript");
   const target = list.querySelector<HTMLElement>(
-    `.message[data-id="${messageId}"]`,
+    `.message[data-id="${CSS.escape(String(messageId))}"]`,
   );
   if (!target) return;
   target.classList.add("message-highlight");
@@ -988,27 +994,32 @@ async function loadProviderInfo(): Promise<void> {
 
 async function switchActiveProvider(providerId: string): Promise<void> {
   if (providerId === activeProviderId) return;
+  if (switchProviderInFlight) return;
+  switchProviderInFlight = true;
+  try {
+    if (providerConnected) {
+      await coreInvoke("provider:disconnect@1").catch(() => undefined);
+      providerConnected = false;
+      providerActive = null;
+      nulqorLoadedActive = false;
+      catalogModels = [];
+    }
 
-  if (providerConnected) {
-    await coreInvoke("provider:disconnect@1").catch(() => undefined);
-    providerConnected = false;
-    providerActive = null;
-    nulqorLoadedActive = false;
-    catalogModels = [];
+    const result = await coreInvoke<{ active: string; default_url: string }>(
+      "provider:set-active@1",
+      { provider: providerId },
+    );
+    activeProviderId = result.active;
+    providerDefaultUrl = result.default_url;
+    el<HTMLInputElement>("#provider-url").value = result.default_url;
+    el<HTMLInputElement>("#provider-url").placeholder = result.default_url;
+    populateModelSelect([], null);
+    applyProviderUi(false, null, false);
+    await loadProviderInfo();
+    void refreshLoadedModelsList();
+  } finally {
+    switchProviderInFlight = false;
   }
-
-  const result = await coreInvoke<{ active: string; default_url: string }>(
-    "provider:set-active@1",
-    { provider: providerId },
-  );
-  activeProviderId = result.active;
-  providerDefaultUrl = result.default_url;
-  el<HTMLInputElement>("#provider-url").value = result.default_url;
-  el<HTMLInputElement>("#provider-url").placeholder = result.default_url;
-  populateModelSelect([], null);
-  applyProviderUi(false, null, false);
-  await loadProviderInfo();
-  void refreshLoadedModelsList();
 }
 
 function openProviderConfig(): void {
@@ -1522,6 +1533,9 @@ async function toggleProviderConnection(): Promise<void> {
 // Actions
 // ---------------------------------------------------------------------------
 
+let sendInFlight = false;
+let switchProviderInFlight = false;
+
 async function updateTokenBudget(): Promise<void> {
   await loadContextProfile();
 }
@@ -1535,6 +1549,7 @@ async function waitForAssistantReply(
   awaitingAssistant = true;
   renderTranscript();
 
+  let timedOut = true;
   while (Date.now() < deadline) {
     await sleep(400);
     // Keep the transcript hash so loadTranscript only re-renders when the
@@ -1544,8 +1559,15 @@ async function waitForAssistantReply(
       messages.length > beforeCount &&
       messages[messages.length - 1]?.role === "assistant"
     ) {
+      timedOut = false;
       break;
     }
+  }
+
+  if (timedOut) {
+    const statusEl = el<HTMLSpanElement>("#connection-status");
+    statusEl.textContent = "response timed out";
+    statusEl.className = "status-error";
   }
 
   awaitingAssistant = false;
@@ -1555,9 +1577,15 @@ async function waitForAssistantReply(
 }
 
 async function sendMessage(): Promise<void> {
+  if (sendInFlight) return;
+  sendInFlight = true;
+
   const input = el<HTMLTextAreaElement>("#message-input");
   const text = input.value.trim();
-  if (!text) return;
+  if (!text) {
+    sendInFlight = false;
+    return;
+  }
 
   input.value = "";
   input.disabled = true;
@@ -1592,11 +1620,8 @@ async function sendMessage(): Promise<void> {
     await loadTranscript();
     scrollTranscriptToBottom("smooth");
 
-    const transcript = await coreInvoke<{ messages: Message[] }>(
-      "transcript:get@1",
-    );
     await coreInvoke("provider:generate@1", {
-      messages: transcript.messages,
+      messages,
       model,
     });
     await waitForAssistantReply(beforeCount);
@@ -1608,6 +1633,7 @@ async function sendMessage(): Promise<void> {
     transcriptHash = "";
     await loadTranscript();
   } finally {
+    sendInFlight = false;
     input.disabled = false;
     input.focus();
   }
@@ -1621,7 +1647,7 @@ async function editUserMessage(messageId: string): Promise<void> {
     "Edit message (creates archived fork if replies exist):",
     msg.content,
   );
-  if (next === null || next.trim() === msg.content) return;
+  if (next === null || next.trim() === msg.content.trim()) return;
 
   try {
     const result = await coreInvoke<{ fork_id?: string; truncated: number }>(
@@ -1640,11 +1666,13 @@ async function editUserMessage(messageId: string): Promise<void> {
         const transcript = await coreInvoke<{ messages: Message[] }>(
           "transcript:get@1",
         );
+        const beforeCount = transcript.messages.length;
         const model = el<HTMLSelectElement>("#model-select").value || undefined;
         await coreInvoke("provider:generate@1", {
           messages: transcript.messages,
           model,
         });
+        await waitForAssistantReply(beforeCount);
         transcriptHash = "";
         await refreshAll();
       }
@@ -1671,6 +1699,10 @@ async function createSession(): Promise<void> {
   await coreInvoke("sessions:create@1", { title: "New chat" });
   transcriptHash = "";
   await loadSessions();
+  if (activeSessionId && !sessions.find((s) => s.id === activeSessionId)) {
+    await new Promise((r) => setTimeout(r, 150));
+    await loadSessions();
+  }
   await refreshAll(true);
   if (activeSessionId) {
     openSessionEditModal(activeSessionId);
@@ -1956,9 +1988,11 @@ function wirePanelEvents(): void {
   });
 
   el<HTMLSelectElement>("#mark-symbol").addEventListener("change", () => {
-    const symbol = el<HTMLSelectElement>("#mark-symbol").value;
+    const selectEl = el<HTMLSelectElement>("#mark-symbol");
+    const symbol = selectEl.value;
     const lastHuman = [...messages].reverse().find((m) => m.role === "user");
     if (lastHuman) void addMarker(lastHuman.id, symbol);
+    selectEl.selectedIndex = 0;
   });
 }
 
@@ -2134,10 +2168,28 @@ export function mount(container: HTMLElement): void {
     pollTimer = null;
   }
 
+  // Increment generation so any in-flight IIFE from the previous mount can
+  // detect it is stale and bail out before touching new state or the DOM.
+  const myGeneration = ++mountGeneration;
+
+  // Reset all module-level state so stale values from a previous mount do not
+  // bleed into the new session.
+  sessions = [];
+  messages = [];
+  railMarkers = [];
+  activeSessionId = "";
+  transcriptHash = "";
+  catalogModels = [];
+  loadedModelsCache = [];
+  contextProfile = null;
+  editingSessionId = null;
+  pendingDeleteSessionId = null;
+  awaitingAssistant = false;
+  refreshInFlight = false;
+  openReasoningIds.clear();
+
   rootEl = container;
   pinTranscriptScroll = true;
-  transcriptHash = "";
-  messages = [];
   buildShell(container);
   wirePanelEvents();
   wireTranscriptScroll();
@@ -2149,8 +2201,11 @@ export function mount(container: HTMLElement): void {
     populateModelSelect([], null);
     updateModelActionButtons();
     await loadProviderInfo();
+    if (mountGeneration !== myGeneration) return;
     await loadSessions();
+    if (mountGeneration !== myGeneration) return;
     await refreshAll(true);
+    if (mountGeneration !== myGeneration) return;
     await updateTokenBudget();
     scrollTranscriptToBottom("auto");
     pollTimer = setInterval(() => {

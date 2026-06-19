@@ -62,7 +62,10 @@ fn append_run_entry(root: &PathBuf, msg: &serde_json::Value) -> std::io::Result<
         .append(true)
         .open(&log_path)?;
 
-    let line = serde_json::to_string(msg).unwrap_or_else(|_| "{}".into());
+    let line = serde_json::to_string(msg).unwrap_or_else(|err| {
+        eprintln!("[run-logger] serialization failed: {:?}", err);
+        "{}".into()
+    });
     writeln!(file, "{line}")?;
     Ok(())
 }

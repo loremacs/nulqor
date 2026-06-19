@@ -72,6 +72,7 @@ impl ProviderState {
                 .expect("reqwest load client"),
             http_generate: reqwest::Client::builder()
                 .timeout(Duration::from_secs(120))
+                .connect_timeout(Duration::from_secs(5))
                 .build()
                 .expect("reqwest generate client"),
             active_model: RwLock::new(None),
@@ -178,7 +179,7 @@ fn register_connect(
 
             caps.check_http_allowed("provider-lmstudio", &url)?;
 
-            let base = format!("{}/v1", url.trim_end_matches("/v1"));
+            let base = format!("{}/v1", url.strip_suffix("/v1").unwrap_or(&url));
             ping_server_sync(&runtime, &state.http_probe, &base)?;
             *state.base_url.write().unwrap() = base;
 
@@ -331,7 +332,7 @@ fn register_models(
             if let Some(url) = input.get("url").and_then(|v| v.as_str()) {
                 let url = url.trim_end_matches('/').to_owned();
                 caps.check_http_allowed("provider-lmstudio", &url)?;
-                let base = format!("{}/v1", url.trim_end_matches("/v1"));
+                let base = format!("{}/v1", url.strip_suffix("/v1").unwrap_or(&url));
                 ping_server_sync(&runtime, &state.http_probe, &base)?;
                 *state.base_url.write().unwrap() = base;
             }
@@ -374,7 +375,7 @@ fn register_loaded_models(
                 if let Some(url) = input.get("url").and_then(|v| v.as_str()) {
                     let url = url.trim_end_matches('/').to_owned();
                     caps.check_http_allowed("provider-lmstudio", &url)?;
-                    let base = format!("{}/v1", url.trim_end_matches("/v1"));
+                    let base = format!("{}/v1", url.strip_suffix("/v1").unwrap_or(&url));
                     ping_server_sync(&runtime, &state.http_probe, &base)?;
                     *state.base_url.write().unwrap() = base;
                 }
@@ -894,10 +895,10 @@ async fn do_generate(
         });
     };
 
-    emit("stream-start", serde_json::json!({ "stream_id": stream_id }));
-
     // Acquire single-flight gate
     let _guard = state.generation_lock.lock().await;
+
+    emit("stream-start", serde_json::json!({ "stream_id": stream_id }));
 
     let base_url = state.base_url.read().unwrap().clone();
 

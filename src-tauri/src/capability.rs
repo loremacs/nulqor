@@ -38,7 +38,7 @@ impl CapabilityRegistry {
         handle: Arc<dyn std::any::Any + Send + Sync>,
     ) -> Result<(), CoreError> {
         let key = format!("{}/{}", decl.capability, decl.instance);
-        let mut map = self.entries.write().unwrap();
+        let mut map = self.entries.write().map_err(|_| CoreError::Io("capability lock poisoned".into()))?;
         if map.contains_key(&key) {
             return Err(CoreError::DuplicateCapability {
                 capability: decl.capability.clone(),
@@ -58,7 +58,7 @@ impl CapabilityRegistry {
         let key = format!("{capability}/{instance}");
         self.entries
             .read()
-            .unwrap()
+            .map_err(|_| CoreError::Io("capability lock poisoned".into()))?
             .get(&key)
             .cloned()
             .ok_or_else(|| CoreError::UnknownCapability {
@@ -95,7 +95,7 @@ impl Capabilities {
         fs_scopes: Vec<String>,
         http_hosts: Vec<String>,
     ) {
-        self.scopes.write().unwrap().insert(
+        self.scopes.write().unwrap_or_else(|p| p.into_inner()).insert(
             ext_id.to_owned(),
             ExtensionScopes { fs_scopes, http_hosts },
         );
@@ -140,7 +140,7 @@ impl Capabilities {
     // ── Scope checks ──────────────────────────────────────────────────────
 
     fn check_fs_scope(&self, ext_id: &str, path: &str) -> Result<(), CoreError> {
-        let scopes = self.scopes.read().unwrap();
+        let scopes = self.scopes.read().map_err(|_| CoreError::Io("capability lock poisoned".into()))?;
         if let Some(ext) = scopes.get(ext_id) {
             if ext.fs_scopes.is_empty() {
                 return Err(CoreError::BoundaryViolation(format!(
@@ -153,6 +153,10 @@ impl Capabilities {
                     "extension '{ext_id}' may not access '{path}' (not in declared fs-scopes)"
                 )));
             }
+        } else {
+            return Err(CoreError::BoundaryViolation(format!(
+                "extension '{ext_id}' has no registered scopes; fs access to '{path}' denied"
+            )));
         }
         Ok(())
     }
@@ -164,7 +168,7 @@ impl Capabilities {
     }
 
     fn check_http_host(&self, ext_id: &str, url: &str) -> Result<(), CoreError> {
-        let scopes = self.scopes.read().unwrap();
+        let scopes = self.scopes.read().map_err(|_| CoreError::Io("capability lock poisoned".into()))?;
         if let Some(ext) = scopes.get(ext_id) {
             let allowed = ext.http_hosts.iter().any(|h| url.contains(h.as_str()));
             if !allowed {
@@ -172,6 +176,10 @@ impl Capabilities {
                     "extension '{ext_id}' may not access '{url}' (not in declared http-hosts)"
                 )));
             }
+        } else {
+            return Err(CoreError::BoundaryViolation(format!(
+                "extension '{ext_id}' has no registered scopes; http access to '{url}' denied"
+            )));
         }
         Ok(())
     }

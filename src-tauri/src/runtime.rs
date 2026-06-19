@@ -22,7 +22,10 @@ impl Runtime {
             .enable_all()
             .thread_name("nulqor-core")
             .build()
-            .expect("failed to start Nulqor async runtime");
+            .unwrap_or_else(|e| {
+                eprintln!("[CORE] fatal: failed to start Nulqor async runtime: {e}");
+                panic!("failed to start Nulqor async runtime: {e}");
+            });
         Self { rt: Some(Arc::new(rt)) }
     }
 

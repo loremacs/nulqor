@@ -56,6 +56,7 @@ export function updateGridGeometry(
   cssScope.style.setProperty("--grid-rows", String(rows));
   cssScope.style.setProperty("--grid-gap", `${GAP}px`);
   cssScope.style.setProperty("--cell-size", `${cellSize}px`);
+  cssScope.style.setProperty("--row-cell-size", `${rowStep - GAP}px`);
   cssScope.style.setProperty("--col-step", `${colStep}px`);
   cssScope.style.setProperty("--row-step", `${rowStep}px`);
   // Active grid now fills the full desktop — no partial-cell clipping needed.

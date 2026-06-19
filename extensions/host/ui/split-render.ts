@@ -738,11 +738,13 @@ function wireSubGridPanelDrag(
     const end = (): void => {
       document.removeEventListener("pointermove", move);
       document.removeEventListener("pointerup", end);
+      document.removeEventListener("pointercancel", end);
       resume();
       persistSplitTree(opts, getTree());
     };
     document.addEventListener("pointermove", move);
     document.addEventListener("pointerup", end);
+    document.addEventListener("pointercancel", end);
   });
 
   header.addEventListener("pointerdown", (event) => {
@@ -912,26 +914,25 @@ function snapToNearest(
   return findSnapTarget(value, targets, threshold) ?? value;
 }
 
-let sashSnapPreviewEl: HTMLElement | null = null;
-
-function sashSnapPreview(shellRoot: HTMLElement): HTMLElement {
-  if (!sashSnapPreviewEl) {
-    sashSnapPreviewEl = document.createElement("div");
-    sashSnapPreviewEl.className = "sash-snap-preview";
-    sashSnapPreviewEl.setAttribute("aria-hidden", "true");
-    sashSnapPreviewEl.hidden = true;
-    shellRoot.append(sashSnapPreviewEl);
+function getSashSnapPreview(): HTMLElement {
+  let el = document.querySelector<HTMLElement>(".sash-snap-preview");
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "sash-snap-preview";
+    el.setAttribute("aria-hidden", "true");
+    el.hidden = true;
+    document.querySelector(".desktop-canvas")?.appendChild(el);
   }
-  return sashSnapPreviewEl;
+  return el;
 }
 
 function showSashSnapPreview(
-  shellRoot: HTMLElement,
+  _shellRoot: HTMLElement,
   desktop: HTMLElement,
   orientation: "vertical" | "horizontal",
   centerClient: number,
 ): void {
-  const el = sashSnapPreview(shellRoot);
+  const el = getSashSnapPreview();
   const desk = desktop.getBoundingClientRect();
   const thickness = 3;
   const half = thickness / 2;
@@ -954,9 +955,10 @@ function showSashSnapPreview(
 }
 
 function hideSashSnapPreview(): void {
-  if (!sashSnapPreviewEl) return;
-  sashSnapPreviewEl.classList.remove("is-visible");
-  sashSnapPreviewEl.hidden = true;
+  const el = document.querySelector<HTMLElement>(".sash-snap-preview");
+  if (!el) return;
+  el.classList.remove("is-visible");
+  el.hidden = true;
 }
 
 function updateSashSnapPreviewDuringDrag(
@@ -1246,7 +1248,7 @@ export async function renderSplitLayout(
   root.dataset.interactive = "true";
   opts.desktop.append(root);
 
-  await renderNode(opts.split.tree, root, renderOpts, getTree, preservedPanels);
+  await renderNode(resolveTree(opts), root, renderOpts, getTree, preservedPanels);
 }
 
 function tileLayoutFromSubGridDom(

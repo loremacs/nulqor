@@ -33,7 +33,7 @@ impl CommandRegistry {
     /// Register a command. Returns `Err` if the same `id@version` is already registered.
     pub fn register(&self, decl: CommandDecl, handler: Handler) -> Result<(), CoreError> {
         let key = decl.id.key();
-        let mut map = self.handlers.write().unwrap();
+        let mut map = self.handlers.write().map_err(|_| CoreError::Io("registry lock poisoned".into()))?;
         if map.contains_key(&key) {
             return Err(CoreError::DuplicateCapability {
                 capability: "command".into(),
@@ -54,36 +54,41 @@ impl CommandRegistry {
         input: serde_json::Value,
     ) -> Result<serde_json::Value, CoreError> {
         let key = id.key();
-        let map = self.handlers.read().unwrap();
-        let entry = map.get(&key).ok_or_else(|| {
-            // Surface available versions in the error for diagnostics
-            let base = id.base_key();
-            let available: Vec<String> = map
-                .keys()
-                .filter(|k| k.starts_with(&base))
-                .cloned()
-                .collect();
-            if available.is_empty() {
-                CoreError::UnknownCommand(key.clone())
-            } else {
-                CoreError::VersionMismatch { wanted: key.clone(), available }
-            }
-        })?;
+        // Hold the read guard only long enough to extract what we need, then drop it
+        // before any blocking I/O (workbench_prefs::load) to avoid deadlocks.
+        let (handler, permission, owner) = {
+            let map = self.handlers.read().map_err(|_| CoreError::Io("registry lock poisoned".into()))?;
+            let entry = map.get(&key).ok_or_else(|| {
+                // Surface available versions in the error for diagnostics
+                let base = id.base_key();
+                let available: Vec<String> = map
+                    .keys()
+                    .filter(|k| k.starts_with(&base))
+                    .cloned()
+                    .collect();
+                if available.is_empty() {
+                    CoreError::UnknownCommand(key.clone())
+                } else {
+                    CoreError::VersionMismatch { wanted: key.clone(), available }
+                }
+            })?;
+            (Arc::clone(&entry.handler), entry.decl.permission, entry.decl.owner.clone())
+        }; // read guard dropped here
 
-        self.gate.check(caller, entry.decl.permission, &key)?;
+        self.gate.check(caller, permission, &key)?;
 
-        if !crate::workbench_prefs::is_protected_extension(&entry.decl.owner) {
+        if !crate::workbench_prefs::is_protected_extension(&owner) {
             let root = crate::workbench_prefs::resolve_workspace_root();
             let prefs = crate::workbench_prefs::load(&root);
-            if !prefs.extension_enabled(&entry.decl.owner) {
+            if !prefs.extension_enabled(&owner) {
                 return Err(CoreError::Io(format!(
                     "extension '{}' is disabled in Workbench",
-                    entry.decl.owner
+                    owner
                 )));
             }
         }
 
-        (entry.handler)(input)
+        (handler)(input)
     }
 
     /// List all registered command ids (for diagnostics / IPC introspection).

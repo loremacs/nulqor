@@ -280,13 +280,11 @@ function paneTrackSizePx(containerSizePx: number, paneCount: number): number {
   return containerSizePx - sashCount * SASH_THICKNESS_PX;
 }
 
-function minPaneRatio(trackSizePx: number): number {
+function minPaneRatio(trackSizePx: number, direction?: SplitDirection): number {
   if (trackSizePx <= 0) return 0.08;
-  return Math.min(
-    PANEL_MIN_WIDTH_PX / trackSizePx,
-    PANEL_MIN_HEIGHT_PX / trackSizePx,
-    0.08,
-  );
+  const minPx =
+    direction === "horizontal" ? PANEL_MIN_WIDTH_PX : PANEL_MIN_HEIGHT_PX;
+  return Math.min(minPx / trackSizePx, 0.08);
 }
 
 /** Drag sash `sashIndex` (between child i and i+1) by `deltaPx` along the container axis. */
@@ -301,7 +299,7 @@ export function dragSash(
   const track = paneTrackSizePx(containerSizePx, container.children.length);
   if (track <= 0) return container;
 
-  const minRatio = minPaneRatio(track);
+  const minRatio = minPaneRatio(track, container.direction);
   const next = cloneSplitNode(container) as SplitContainer;
   const left = next.children[sashIndex];
   const right = next.children[sashIndex + 1];
@@ -385,7 +383,7 @@ export function setSashBoundary(
   const track = paneTrackSizePx(containerSizePx, container.children.length);
   if (track <= 0) return container;
 
-  const minRatio = minPaneRatio(track);
+  const minRatio = minPaneRatio(track, container.direction);
   const next = cloneSplitNode(container) as SplitContainer;
   const fixedBefore = next.children
     .slice(0, sashIndex)

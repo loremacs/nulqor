@@ -309,6 +309,14 @@ function clampTile(tile: TileLayout, metrics: GridMetrics): TileLayout {
   return clampTileToDesk(tile, metrics);
 }
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function clearTilePositionStyle(el: HTMLElement): void {
   el.style.gridColumn = "";
   el.style.gridRow = "";
@@ -356,6 +364,7 @@ function trackPointerSession(
 
 export type ShellHandle = {
   resyncWindowMode: () => Promise<void>;
+  dispose: () => void;
 };
 
 export async function initShell(): Promise<ShellHandle> {
@@ -571,6 +580,7 @@ export async function initShell(): Promise<ShellHandle> {
   const applyWindowModePolicy = (
     mode: WindowMode,
     previous: WindowMode,
+    isRuntimeChange: boolean = false,
   ): void => {
     windowMode = mode;
     setWindowModePresentation(mode);
@@ -581,6 +591,7 @@ export async function initShell(): Promise<ShellHandle> {
       clickThrough.forceClickable();
       void primeNativeBackgroundForMode("windowed");
       if (
+        isRuntimeChange &&
         previous !== mode &&
         previous === "fullscreen" &&
         shell.click_through
@@ -788,6 +799,7 @@ export async function initShell(): Promise<ShellHandle> {
       return;
     }
 
+    if (gen !== renderGeneration) return;
     clearSplitArtifacts();
     desktop.className = "desktop-canvas desktop-grid";
     if (layoutEditing) desktop.classList.add("canvas-editing");
@@ -856,9 +868,7 @@ export async function initShell(): Promise<ShellHandle> {
     }
     applyShellCss(shellRoot, shell);
     refreshGrid();
-    if (canvasMode === "grid") {
-      syncTilesFromLayouts();
-    }
+    syncTilesFromLayouts();
     persist();
     void renderCanvas();
     renderAppsMenu();
@@ -939,7 +949,7 @@ export async function initShell(): Promise<ShellHandle> {
         row.dataset.profileId = profile.id;
         row.innerHTML =
           '<span class="menu-dropdown-gutter menu-dropdown-check" aria-hidden="true"></span>' +
-          `<span class="menu-dropdown-text">${profile.name}</span>`;
+          `<span class="menu-dropdown-text">${escapeHtml(profile.name)}</span>`;
         syncMenuCheckRow(row, activeProfileId === profile.id);
       } else {
         row.disabled = true;
@@ -980,7 +990,7 @@ export async function initShell(): Promise<ShellHandle> {
       row.dataset.splitPreset = preset.id;
       row.innerHTML =
         '<span class="menu-dropdown-gutter" aria-hidden="true"></span>' +
-        `<span class="menu-dropdown-text">${preset.label}</span>`;
+        `<span class="menu-dropdown-text">${escapeHtml(preset.label)}</span>`;
       layoutPanel.append(row);
     }
 
@@ -1241,8 +1251,10 @@ export async function initShell(): Promise<ShellHandle> {
     const prevMetrics = gridMetrics;
 
     if (key === "cell_pixels") {
+      const splitManagedIds = new Set(allPanelIdsInTree(splitState.tree));
       const origin = desktop.getBoundingClientRect();
       tiles = tiles.map((t) => {
+        if (canvasMode === "split" && splitManagedIds.has(t.id)) return t;
         const el = desktop.querySelector<HTMLElement>(
           `:scope > .panel-tile[data-panel-id="${t.id}"]`,
         );
@@ -1461,6 +1473,7 @@ export async function initShell(): Promise<ShellHandle> {
       persist();
       void renderCanvas();
       renderLayoutMenu();
+      if (isMacOS()) syncNativeMenuLayout();
       return;
     }
 
@@ -1518,7 +1531,7 @@ export async function initShell(): Promise<ShellHandle> {
       syncClickThrough();
     },
     onWindowModeChanged: (mode, previous) => {
-      applyWindowModePolicy(mode, previous);
+      applyWindowModePolicy(mode, previous, true);
       persist();
     },
     onMenuDockDrag: (endEvent) => {
@@ -1600,6 +1613,7 @@ export async function initShell(): Promise<ShellHandle> {
       }
     }
     syncTilesFromLayouts();
+    persist();
     await renderCanvas();
     renderAppsMenu();
     renderLayoutMenu();
@@ -1812,8 +1826,10 @@ export async function initShell(): Promise<ShellHandle> {
     }
   };
 
+  let unlistenMenuAction: (() => void) | null = null;
+
   if (isMacOS()) {
-    await listen<string>("nulqor:menu-action", async (event) => {
+    unlistenMenuAction = await listen<string>("nulqor:menu-action", async (event) => {
       const id = event.payload;
 
       if (id === "settings:click_through") {
@@ -1878,6 +1894,7 @@ export async function initShell(): Promise<ShellHandle> {
           }
         }
         syncTilesFromLayouts();
+        persist();
         await renderCanvas();
         renderAppsMenu();
         renderLayoutMenu();
@@ -1899,6 +1916,10 @@ export async function initShell(): Promise<ShellHandle> {
         windowChrome.getWindowMode(),
         windowChrome.getWindowMode(),
       );
+    },
+    dispose: () => {
+      unlistenMenuAction?.();
+      unlistenMenuAction = null;
     },
   };
 }

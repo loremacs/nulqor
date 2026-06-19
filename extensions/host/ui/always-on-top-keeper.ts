@@ -16,6 +16,7 @@ export function mountAlwaysOnTopKeeper(
   const win = getCurrentWindow();
   let timer: ReturnType<typeof setInterval> | null = null;
   let focusUnlisten: (() => void) | null = null;
+  let syncGeneration = 0;
 
   const reassertNow = (): void => {
     if (!shouldKeep()) return;
@@ -23,6 +24,7 @@ export function mountAlwaysOnTopKeeper(
   };
 
   const stop = (): void => {
+    syncGeneration++;
     if (timer !== null) {
       clearInterval(timer);
       timer = null;
@@ -35,11 +37,16 @@ export function mountAlwaysOnTopKeeper(
     stop();
     if (!active) return;
 
+    const generation = syncGeneration;
     void win
       .onFocusChanged(({ payload: focused }) => {
         if (!focused) reassertNow();
       })
       .then((unlisten) => {
+        if (syncGeneration !== generation) {
+          unlisten();
+          return;
+        }
         focusUnlisten = unlisten;
       });
 

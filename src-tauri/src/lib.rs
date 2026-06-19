@@ -47,7 +47,6 @@ use extensions::{
     http_api, mcp_bridge, provider_llamacpp, provider_lmstudio, provider_ollama, provider_router,
     registry, run_logger, session_store, skill_runner, transcript, validation, workbench,
 };
-use startup_config::load_startup_config;
 use permission::PermissionGate;
 use runtime::Runtime;
 use version::VersionManager;
@@ -70,10 +69,13 @@ fn build_core(_extensions_dir: &std::path::Path) -> CoreContext {
     }
 }
 
-fn load_extensions(extensions_dir: &std::path::Path, ctx: &CoreContext) {
+fn load_extensions(
+    extensions_dir: &std::path::Path,
+    ctx: &CoreContext,
+    startup: &startup_config::StartupConfig,
+) {
     // Repo root is the parent of extensions/
     let root = extensions_dir.parent().unwrap_or(extensions_dir);
-    let startup = load_startup_config(root);
 
     let canvas_config =
         startup_config::canvas_config_json(&startup, extensions_dir);
@@ -179,28 +181,34 @@ pub fn run() {
                 .map(|p| p.join("extensions"))
                 .filter(|p| p.exists());
 
-            let extensions_dir = resource_extensions.unwrap_or_else(|| {
-                // cargo sets CWD to the package root (src-tauri/); the extensions/
-                // dir lives one level up at the workspace root.
-                let cwd = std::env::current_dir()
-                    .expect("cannot determine working directory");
-                if let Some(parent) = cwd.parent() {
-                    let parent_ext = parent.join("extensions");
-                    if parent_ext.exists() {
-                        return parent_ext;
+            let extensions_dir = match resource_extensions {
+                Some(dir) => dir,
+                None => {
+                    // cargo sets CWD to the package root (src-tauri/); the extensions/
+                    // dir lives one level up at the workspace root.
+                    let cwd = std::env::current_dir()
+                        .map_err(|e| format!("cannot determine working directory: {e}"))?;
+                    if let Some(parent) = cwd.parent() {
+                        let parent_ext = parent.join("extensions");
+                        if parent_ext.exists() {
+                            parent_ext
+                        } else {
+                            cwd.join("extensions")
+                        }
+                    } else {
+                        cwd.join("extensions")
                     }
                 }
-                cwd.join("extensions")
-            });
+            };
 
+            let root = extensions_dir.parent().unwrap_or(&extensions_dir).to_path_buf();
+            let startup = startup_config::load_startup_config(&root);
             let ctx = build_core(&extensions_dir);
-            load_extensions(&extensions_dir, &ctx);
+            load_extensions(&extensions_dir, &ctx, &startup);
 
             // macOS: build the native menu bar and forward activations to JS.
             #[cfg(target_os = "macos")]
             {
-                let root = extensions_dir.parent().unwrap_or(&extensions_dir).to_path_buf();
-                let startup = startup_config::load_startup_config(&root);
                 let panels = startup_config::discover_panels(
                     &extensions_dir,
                     startup.enabled_extensions.as_ref(),

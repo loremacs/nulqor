@@ -561,12 +561,8 @@ fn unload_model_sync(
     runtime: &Runtime,
     model: &str,
 ) -> bool {
-    let removed = {
-        let mut warmed = state.nulqor_warmed.write().unwrap();
-        let pos = warmed.iter().position(|m| m == model);
-        pos.map(|idx| warmed.remove(idx)).is_some()
-    };
-    if !removed {
+    let in_list = state.nulqor_warmed.read().unwrap().iter().any(|m| m == model);
+    if !in_list {
         return false;
     }
     let base = state.base_url.read().unwrap().clone();
@@ -575,17 +571,28 @@ fn unload_model_sync(
         return false;
     }
     let http = state.http.load.clone();
-    let model = model.to_owned();
-    runtime
-        .block_on_compat(async move { unload_model(&http, &root, &model).await })
-        .map_err(|e| eprintln!("[provider-ollama] unload failed: {e}"))
-        .is_ok()
+    let model_owned = model.to_owned();
+    let result = runtime
+        .block_on_compat(async move { unload_model(&http, &root, &model_owned).await });
+    match result {
+        Ok(()) => {
+            let mut warmed = state.nulqor_warmed.write().unwrap();
+            warmed.retain(|m| m != model);
+            true
+        }
+        Err(e) => {
+            eprintln!("[provider-ollama] unload failed: {e}");
+            false
+        }
+    }
 }
 
 fn unload_all_nulqor_sync(state: &ProviderState, caps: &Capabilities, runtime: &Runtime) {
-    let models: Vec<String> = state.nulqor_warmed.write().unwrap().drain(..).collect();
+    let models: Vec<String> = state.nulqor_warmed.read().unwrap().clone();
     for model in models {
-        let _ = unload_model_sync(state, caps, runtime, &model);
+        if !unload_model_sync(state, caps, runtime, &model) {
+            eprintln!("[nulqor] Failed to unload model: {:?}", model);
+        }
     }
 }
 
