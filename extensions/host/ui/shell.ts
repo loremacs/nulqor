@@ -1664,8 +1664,8 @@ export async function initShell(): Promise<ShellHandle> {
         row: cell.row,
         pixelLock: {
           ...tile.pixelLock,
-          left: (cell.col - 1) * gridMetrics.step,
-          top: (cell.row - 1) * gridMetrics.step,
+          left: (cell.col - 1) * gridMetrics.colStep,
+          top: (cell.row - 1) * gridMetrics.rowStep,
         },
       };
     }
@@ -1695,9 +1695,12 @@ export async function initShell(): Promise<ShellHandle> {
     persist();
   };
 
-  desktop.addEventListener("pointerdown", (event) => {
+  // Listen on document rather than desktop so that pointer-events:none on the
+  // canvas element never silently swallows bubbled events in WKWebView.
+  document.addEventListener("pointerdown", (event) => {
     if (canvasMode !== "grid") return;
     const target = event.target as HTMLElement;
+    if (!target.closest(".desktop-canvas")) return;
 
     const handle = target.closest(".panel-resize-handle");
     if (handle) {

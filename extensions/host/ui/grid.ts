@@ -6,6 +6,11 @@ export type GridMetrics = {
   rows: number;
   gap: number;
   cellSize: number;
+  /** Horizontal cell pitch (px): stretched to fill desktop width exactly. */
+  colStep: number;
+  /** Vertical cell pitch (px): stretched to fill desktop height exactly. */
+  rowStep: number;
+  /** @deprecated Use colStep. Kept for call sites that haven't been updated. */
   step: number;
   desktopW: number;
   desktopH: number;
@@ -25,7 +30,7 @@ function deskRows(desktopH: number, step: number): number {
   return Math.max(1, Math.floor((desktopH + GAP) / step));
 }
 
-/** Fixed square cells tiled across the full desktop; cell size is independent of window size. */
+/** Cells stretched per axis to fill the full desktop — no dead space at edges. */
 export function updateGridGeometry(
   shellRoot: HTMLElement,
   desktop: HTMLElement,
@@ -34,28 +39,37 @@ export function updateGridGeometry(
   cssScope: HTMLElement = shellRoot,
 ): GridMetrics {
   const rect = desktop.getBoundingClientRect();
-  const cellSize = cellPixels(shell);
-  const step = cellSize + GAP;
+  const preferredCellSize = cellPixels(shell);
+  const preferredStep = preferredCellSize + GAP;
   const desktopW = Math.max(0, rect.width);
   const desktopH = Math.max(0, rect.height);
-  const cols = deskColumns(desktopW, step);
-  const rows = deskRows(desktopH, step);
+  const cols = deskColumns(desktopW, preferredStep);
+  const rows = deskRows(desktopH, preferredStep);
+
+  // Stretch each axis independently so the grid fills the full desktop area.
+  // colStep and rowStep differ by at most a few pixels on typical screens.
+  const colStep = cols > 0 ? (desktopW + GAP) / cols : preferredStep;
+  const rowStep = rows > 0 ? (desktopH + GAP) / rows : preferredStep;
+  const cellSize = colStep - GAP;
 
   cssScope.style.setProperty("--grid-cols", String(cols));
   cssScope.style.setProperty("--grid-rows", String(rows));
   cssScope.style.setProperty("--grid-gap", `${GAP}px`);
   cssScope.style.setProperty("--cell-size", `${cellSize}px`);
-  // Exact pixel extent of the active grid — used to clip grid lines so partial
-  // cells at the right/bottom edges are not shown as accessible positions.
-  cssScope.style.setProperty("--grid-active-width", `${cols * step - GAP}px`);
-  cssScope.style.setProperty("--grid-active-height", `${rows * step - GAP}px`);
+  cssScope.style.setProperty("--col-step", `${colStep}px`);
+  cssScope.style.setProperty("--row-step", `${rowStep}px`);
+  // Active grid now fills the full desktop — no partial-cell clipping needed.
+  cssScope.style.setProperty("--grid-active-width", `${desktopW}px`);
+  cssScope.style.setProperty("--grid-active-height", `${desktopH}px`);
 
   return {
     cols,
     rows,
     gap: GAP,
     cellSize,
-    step,
+    colStep,
+    rowStep,
+    step: colStep,
     desktopW,
     desktopH,
     originX: 0,
@@ -86,8 +100,8 @@ export function pointerToGridCell(
     0,
     Math.min(metrics.desktopH - 0.001, clientY - rect.top - metrics.originY),
   );
-  const col = Math.min(metrics.cols, Math.floor(x / metrics.step) + 1);
-  const row = Math.min(metrics.rows, Math.floor(y / metrics.step) + 1);
+  const col = Math.min(metrics.cols, Math.floor(x / metrics.colStep) + 1);
+  const row = Math.min(metrics.rows, Math.floor(y / metrics.rowStep) + 1);
   return { col: Math.max(1, col), row: Math.max(1, row) };
 }
 
@@ -97,8 +111,8 @@ export function tilePixelSize(
   metrics: GridMetrics,
 ): { width: number; height: number } {
   return {
-    width: tile.colSpan * metrics.step,
-    height: tile.rowSpan * metrics.step,
+    width: tile.colSpan * metrics.colStep,
+    height: tile.rowSpan * metrics.rowStep,
   };
 }
 
@@ -108,8 +122,8 @@ export function tileSnapRect(
 ): { left: number; top: number; width: number; height: number } {
   const { width, height } = tilePixelSize(tile, metrics);
   return {
-    left: (tile.col - 1) * metrics.step,
-    top: (tile.row - 1) * metrics.step,
+    left: (tile.col - 1) * metrics.colStep,
+    top: (tile.row - 1) * metrics.rowStep,
     width,
     height,
   };
@@ -153,11 +167,11 @@ export function menuDockSnapTarget(
 }
 
 export function minTileColSpan(metrics: GridMetrics): number {
-  return Math.max(1, Math.ceil(PANEL_MIN_WIDTH_PX / metrics.step));
+  return Math.max(1, Math.ceil(PANEL_MIN_WIDTH_PX / metrics.colStep));
 }
 
 export function minTileRowSpan(metrics: GridMetrics): number {
-  return Math.max(1, Math.ceil(PANEL_MIN_HEIGHT_PX / metrics.step));
+  return Math.max(1, Math.ceil(PANEL_MIN_HEIGHT_PX / metrics.rowStep));
 }
 
 export function clampTileToDesk(
@@ -223,12 +237,18 @@ export function metricsForCellSize(
   desktopH = 1080,
 ): GridMetrics {
   const step = cellSize + GAP;
+  const cols = deskColumns(desktopW, step);
+  const rows = deskRows(desktopH, step);
+  const colStep = cols > 0 ? (desktopW + GAP) / cols : step;
+  const rowStep = rows > 0 ? (desktopH + GAP) / rows : step;
   return {
-    cols: deskColumns(desktopW, step),
-    rows: deskRows(desktopH, step),
+    cols,
+    rows,
     gap: GAP,
     cellSize,
-    step,
+    colStep,
+    rowStep,
+    step: colStep,
     desktopW,
     desktopH,
     originX: 0,
@@ -248,11 +268,11 @@ export function snapTileFromPointer(
   const base = tile.pixelLock ?? tileSnapRect(tile, metrics);
   const colSpan = Math.max(
     1,
-    Math.min(metrics.cols, Math.round(base.width / metrics.step)),
+    Math.min(metrics.cols, Math.round(base.width / metrics.colStep)),
   );
   const rowSpan = Math.max(
     1,
-    Math.min(metrics.rows, Math.round(base.height / metrics.step)),
+    Math.min(metrics.rows, Math.round(base.height / metrics.rowStep)),
   );
   return clampTileToDesk(
     {
@@ -277,21 +297,21 @@ export function tileLayoutFromPixelRect(
 ): TileLayout {
   const colSpan = Math.max(
     1,
-    Math.min(metrics.cols, Math.round(rect.width / metrics.step)),
+    Math.min(metrics.cols, Math.round(rect.width / metrics.colStep)),
   );
   const rowSpan = Math.max(
     1,
-    Math.min(metrics.rows, Math.round(rect.height / metrics.step)),
+    Math.min(metrics.rows, Math.round(rect.height / metrics.rowStep)),
   );
   const maxCol = Math.max(1, metrics.cols - colSpan + 1);
   const maxRow = Math.max(1, metrics.rows - rowSpan + 1);
   const col = Math.min(
     maxCol,
-    Math.max(1, Math.floor(rect.left / metrics.step) + 1),
+    Math.max(1, Math.floor(rect.left / metrics.colStep) + 1),
   );
   const row = Math.min(
     maxRow,
-    Math.max(1, Math.floor(rect.top / metrics.step) + 1),
+    Math.max(1, Math.floor(rect.top / metrics.rowStep) + 1),
   );
   return { id, col, row, colSpan, rowSpan };
 }
@@ -343,11 +363,11 @@ export function tileFromWindowRect(
 
   const colSpan = Math.max(
     1,
-    Math.min(metrics.cols, Math.round(local.width / metrics.step)),
+    Math.min(metrics.cols, Math.round(local.width / metrics.colStep)),
   );
   const rowSpan = Math.max(
     1,
-    Math.min(metrics.rows, Math.round(local.height / metrics.step)),
+    Math.min(metrics.rows, Math.round(local.height / metrics.rowStep)),
   );
   return clampTileToDesk(
     {

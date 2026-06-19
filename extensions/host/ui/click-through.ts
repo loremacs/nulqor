@@ -2,9 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 
 const INTERACTIVE_SELECTOR =
-  ".menu-bar, .menu-bar-menus, .menu-window-controls, .panel-tile, .menu-dropdown:not([hidden]), .shell-modal-backdrop, .split-sash, .split-slot-edit-bar, .split-slot-edit-bar button";
+  ".menu-bar, .menu-bar-menus, .menu-window-controls, .panel-tile, .panel-resize-handle, .menu-dropdown:not([hidden]), .shell-modal-backdrop, .split-sash, .split-slot-edit-bar, .split-slot-edit-bar button";
 const POLL_MS = 16;
-const HITBOX_PAD_PX = 2;
+// Padding around each interactive element's bounding rect.  Must be ≥ GAP/2
+// (where GAP = 8 px between grid cells) so there is no dead zone in the gap.
+const HITBOX_PAD_PX = 6;
 
 export type ClickThroughHandle = {
   refresh: () => void;
@@ -97,15 +99,28 @@ export function mountClickThrough(
     }
   };
 
-  const setIgnoring = async (next: boolean): Promise<void> => {
-    if (disposed || ignoring === next) return;
+  // Serialize all setIgnoreCursorEvents IPC calls through a single promise
+  // chain.  This prevents the race where a slow `true` IPC completes after a
+  // fast `false` IPC, leaving the OS in pass-through while local `ignoring`
+  // thinks it is clickable.  Each task checks `ignoring` at execution time;
+  // superseded tasks (where `ignoring` no longer matches the queued value)
+  // are skipped, so only the last-requested state reaches the OS.
+  let ipcChain: Promise<void> = Promise.resolve();
+
+  const setIgnoring = (next: boolean): Promise<void> => {
+    if (disposed) return Promise.resolve();
     ignoring = next;
-    try {
-      await win.setIgnoreCursorEvents(next);
-      if (next) options.onPassThrough?.();
-    } catch (err) {
-      console.warn("[click-through] setIgnoreCursorEvents failed:", err);
-    }
+    const intended = next;
+    ipcChain = ipcChain.then(async () => {
+      if (disposed || ignoring !== intended) return; // superseded
+      try {
+        await win.setIgnoreCursorEvents(intended);
+        if (intended) options.onPassThrough?.();
+      } catch (err) {
+        console.warn("[click-through] setIgnoreCursorEvents failed:", err);
+      }
+    });
+    return ipcChain;
   };
 
   const ensureClickable = async (): Promise<void> => {

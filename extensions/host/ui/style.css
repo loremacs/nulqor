@@ -875,8 +875,8 @@ html.nulqor-startup-hidden .nulqor-shell[data-window-mode="windowed"] {
   background-image:
     linear-gradient(to right, rgba(255, 255, 255, 0.07) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
-  background-size: calc(var(--cell-size) + var(--grid-gap))
-    calc(var(--cell-size) + var(--grid-gap));
+  background-size: var(--col-step, calc(var(--cell-size) + var(--grid-gap)))
+    var(--row-step, calc(var(--cell-size) + var(--grid-gap)));
   background-position: 0 0;
 }
 
@@ -955,8 +955,10 @@ html.nulqor-startup-hidden .nulqor-shell[data-window-mode="windowed"] {
   position: absolute;
   right: 0;
   bottom: 0;
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
+  /* Must be above panel body content (chat overlays, positioned elements, etc.). */
+  z-index: 10;
   cursor: nwse-resize;
   background: linear-gradient(
     135deg,
@@ -1216,8 +1218,8 @@ html.nulqor-startup-hidden .nulqor-shell[data-window-mode="windowed"] {
   background-image:
     linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-  background-size: calc(var(--cell-size) + var(--grid-gap))
-    calc(var(--cell-size) + var(--grid-gap));
+  background-size: var(--col-step, calc(var(--cell-size) + var(--grid-gap)))
+    var(--row-step, calc(var(--cell-size) + var(--grid-gap)));
 }
 
 .window-resize-layer {
