@@ -45,6 +45,10 @@ export function updateGridGeometry(
   cssScope.style.setProperty("--grid-rows", String(rows));
   cssScope.style.setProperty("--grid-gap", `${GAP}px`);
   cssScope.style.setProperty("--cell-size", `${cellSize}px`);
+  // Exact pixel extent of the active grid — used to clip grid lines so partial
+  // cells at the right/bottom edges are not shown as accessible positions.
+  cssScope.style.setProperty("--grid-active-width", `${cols * step - GAP}px`);
+  cssScope.style.setProperty("--grid-active-height", `${rows * step - GAP}px`);
 
   return {
     cols,

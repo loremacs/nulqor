@@ -18,7 +18,7 @@
 
 use std::sync::Arc;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 mod capability;
 mod commands;
@@ -28,6 +28,7 @@ mod events;
 mod extensions;
 mod ipc;
 mod loader;
+mod native_menu;
 mod permission;
 mod runtime;
 mod shell_cursor;
@@ -195,6 +196,30 @@ pub fn run() {
             let ctx = build_core(&extensions_dir);
             load_extensions(&extensions_dir, &ctx);
 
+            // macOS: build the native menu bar and forward activations to JS.
+            #[cfg(target_os = "macos")]
+            {
+                let root = extensions_dir.parent().unwrap_or(&extensions_dir).to_path_buf();
+                let startup = startup_config::load_startup_config(&root);
+                let panels = startup_config::discover_panels(
+                    &extensions_dir,
+                    startup.enabled_extensions.as_ref(),
+                );
+                let all_panel_ids: Vec<String> = panels.iter().map(|p| p.id.clone()).collect();
+                if let Err(e) = native_menu::build_and_install(
+                    app.handle(),
+                    &startup.open_panels,
+                    &all_panel_ids,
+                    &startup.shell,
+                ) {
+                    eprintln!("[menu] native menu build failed: {e}");
+                }
+                app.on_menu_event(|app, event| {
+                    let id = event.id().as_ref().to_string();
+                    let _ = app.emit("nulqor:menu-action", id);
+                });
+            }
+
             app.manage(AppState::new(ctx));
             Ok(())
         })
@@ -203,6 +228,8 @@ pub fn run() {
             ipc::core_list_commands,
             shell_cursor::shell_cursor_client,
             window_frame::sync_window_frame,
+            native_menu::update_menu_check,
+            native_menu::update_window_mode_label,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nulqor");

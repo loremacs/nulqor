@@ -29,7 +29,7 @@ cell_pixels = 64
 snap_enabled = true
 show_grid = true
 click_through = true
-always_on_top = false
+always_on_top = true
 
 # Switch local backend (must be in enabled_extensions):
 #   active_provider = "lmstudio"   # LM Studio — http://localhost:1234

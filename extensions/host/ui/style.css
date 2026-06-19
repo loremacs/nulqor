@@ -4,6 +4,11 @@
   box-sizing: border-box;
 }
 
+/* ── macOS: menu items live in NSMenu; keep drag strip + window controls ── */
+html.platform-macos .menu-bar-menus {
+  display: none;
+}
+
 html,
 body,
 #app {
@@ -419,6 +424,63 @@ html.nulqor-startup-hidden .nulqor-shell[data-window-mode="windowed"] {
   color: #fff;
 }
 
+/* ── macOS leading window controls ─────────────────────────────────────────── */
+
+.nulqor-shell[data-platform="macos"] .menu-window-controls {
+  order: -1;
+  margin-left: 0;
+  margin-right: 8px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+}
+
+/* Traffic-light circles */
+.nulqor-shell[data-platform="macos"] .menu-window-btn {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  font-size: 0;        /* hide text labels by default */
+  padding: 0;
+  flex-shrink: 0;
+}
+
+/* Button order: close · minimize · zoom */
+.nulqor-shell[data-platform="macos"] .menu-window-btn[data-action="close"]   { order: 1; background: #ff5f57; }
+.nulqor-shell[data-platform="macos"] .menu-window-btn[data-action="minimize"] { order: 2; background: #ffbd2e; }
+.nulqor-shell[data-platform="macos"] .menu-window-btn[data-action="restore"]  { order: 3; background: #28c840; }
+
+/* Hover: reveal symbol from textContent (×, —, ↙/↗ set by chrome-mount) */
+.nulqor-shell[data-platform="macos"] .menu-window-controls:hover .menu-window-btn {
+  font-size: 8px;
+  color: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+/* Keep each button's traffic-light colour on hover (override base hover rules) */
+.nulqor-shell[data-platform="macos"] .menu-window-btn:hover,
+.nulqor-shell[data-platform="macos"] .menu-window-btn-close:hover {
+  background: unset;
+  color: unset;
+}
+.nulqor-shell[data-platform="macos"] .menu-window-btn[data-action="close"]:hover   { background: #ff5f57; color: rgba(0, 0, 0, 0.65); }
+.nulqor-shell[data-platform="macos"] .menu-window-btn[data-action="minimize"]:hover { background: #ffbd2e; color: rgba(0, 0, 0, 0.65); }
+.nulqor-shell[data-platform="macos"] .menu-window-btn[data-action="restore"]:hover  { background: #28c840; color: rgba(0, 0, 0, 0.65); }
+
+/* Side-docked menu bar: stack vertically like Windows (no traffic lights for side dock) */
+.nulqor-shell[data-platform="macos"] .menu-bar[data-dock="left"] .menu-window-controls,
+.nulqor-shell[data-platform="macos"] .menu-bar[data-dock="right"] .menu-window-controls {
+  order: unset;
+  margin-left: 0;
+  margin-right: 0;
+  flex-direction: column;
+  width: 100%;
+  padding-bottom: 4px;
+}
+
 .menu-dropdown {
   position: absolute;
   top: 100%;
@@ -799,7 +861,17 @@ html.nulqor-startup-hidden .nulqor-shell[data-window-mode="windowed"] {
   overflow: visible;
 }
 
-.nulqor-shell.show-grid .desktop-grid {
+/* Grid lines live on ::before so they stop exactly at the active cell boundary.
+   The parent fills the full desktop for panel dragging; the pseudo-element is
+   sized to --grid-active-width/height so partial edge cells are never shown. */
+.nulqor-shell.show-grid .desktop-grid::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--grid-active-width, 100%);
+  height: var(--grid-active-height, 100%);
+  pointer-events: none;
   background-image:
     linear-gradient(to right, rgba(255, 255, 255, 0.07) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
@@ -808,7 +880,7 @@ html.nulqor-startup-hidden .nulqor-shell[data-window-mode="windowed"] {
   background-position: 0 0;
 }
 
-.nulqor-shell[data-window-mode="fullscreen"].show-grid .desktop-grid {
+.nulqor-shell[data-window-mode="fullscreen"].show-grid .desktop-grid::before {
   background-image:
     linear-gradient(to right, rgba(255, 255, 255, 0.16) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 255, 255, 0.16) 1px, transparent 1px);

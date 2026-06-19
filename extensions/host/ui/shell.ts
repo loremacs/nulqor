@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import {
@@ -78,6 +79,7 @@ import {
 import { mountWindowResize } from "./window-resize";
 import { mountWindowChrome } from "./window-chrome";
 import type { WindowMode } from "./window-chrome";
+import { isMacOS } from "./platform";
 
 const DEFAULT_TILE_COLS = 4;
 const DEFAULT_TILE_ROWS = 3;
@@ -98,8 +100,10 @@ function defaultTile(
 ): TileLayout {
   const colSpan = DEFAULT_TILE_COLS;
   const rowSpan = DEFAULT_TILE_ROWS;
-  const slotsPerRow = Math.max(1, metrics.cols - colSpan + 1);
-  const col = 1 + (index % slotsPerRow);
+  // Step by colSpan so panels don't overlap (stepping by 1 put all panels in the
+  // top-left since a 4-wide panel at col=1 and another at col=2 fully overlap).
+  const slotsPerRow = Math.max(1, Math.floor(metrics.cols / colSpan));
+  const col = 1 + (index % slotsPerRow) * colSpan;
   const row = 1 + Math.floor(index / slotsPerRow) * rowSpan;
   return { id, col, row, colSpan, rowSpan };
 }
@@ -358,6 +362,10 @@ export async function initShell(): Promise<ShellHandle> {
   const app = document.getElementById("app");
   if (!app) throw new Error("#app not found");
 
+  if (isMacOS()) {
+    document.documentElement.classList.add("platform-macos");
+  }
+
   const canvasConfig = await fetchCanvasConfig();
   const persisted = loadPersisted();
 
@@ -592,6 +600,10 @@ export async function initShell(): Promise<ShellHandle> {
 
     syncSettingsInputs();
     syncClickThrough();
+
+    if (isMacOS()) {
+      void invoke("update_window_mode_label", { isFullscreen: mode === "fullscreen" });
+    }
   };
 
   const syncClickThrough = (): void => {
@@ -1206,6 +1218,9 @@ export async function initShell(): Promise<ShellHandle> {
       topmostKeeper.sync(shell.always_on_top && windowMode === "fullscreen");
     }
     persist();
+    if (isMacOS()) {
+      void invoke("update_menu_check", { id: `settings:${key}`, checked: key === "click_through" ? effectiveClickThrough() : shell[key] });
+    }
   };
 
   const applyShellSetting = (
@@ -1429,6 +1444,10 @@ export async function initShell(): Promise<ShellHandle> {
       persist();
       void renderCanvas();
       renderLayoutMenu();
+      if (isMacOS()) {
+        void invoke("update_menu_check", { id: "layout:grid",  checked: canvasMode === "grid" });
+        void invoke("update_menu_check", { id: "layout:split", checked: canvasMode === "split" });
+      }
       return;
     }
 
@@ -1469,6 +1488,10 @@ export async function initShell(): Promise<ShellHandle> {
     ) {
       applyShellSetting(setting);
       renderLayoutMenu();
+      if (isMacOS() && (setting === "snap_enabled" || setting === "show_grid")) {
+        const nativeId = setting === "snap_enabled" ? "layout:snap" : "layout:show_grid";
+        void invoke("update_menu_check", { id: nativeId, checked: shell[setting] });
+      }
     }
   });
 
@@ -1580,6 +1603,9 @@ export async function initShell(): Promise<ShellHandle> {
     await renderCanvas();
     renderAppsMenu();
     renderLayoutMenu();
+    if (isMacOS()) {
+      void invoke("update_menu_check", { id: `apps:${panelId}`, checked: !open });
+    }
   });
 
   desktop.addEventListener("click", async (event) => {
@@ -1593,6 +1619,9 @@ export async function initShell(): Promise<ShellHandle> {
     await renderCanvas();
     renderAppsMenu();
     renderLayoutMenu();
+    if (isMacOS()) {
+      void invoke("update_menu_check", { id: `apps:${closeId}`, checked: false });
+    }
   });
 
   let tileDrag: {
@@ -1758,6 +1787,107 @@ export async function initShell(): Promise<ShellHandle> {
     const target = event.target as Element;
     if (!target.closest(".menu-group")) closeDropdowns();
   });
+
+  // ── macOS native menu bar integration ───────────────────────────────────
+  // Sync helpers push JS state into the native NSMenu check items after
+  // any action (webview or native menu) changes local state.
+  const syncNativeMenuSettings = (): void => {
+    void invoke("update_menu_check", { id: "settings:click_through", checked: effectiveClickThrough() });
+    void invoke("update_menu_check", { id: "settings:always_on_top", checked: shell.always_on_top });
+  };
+
+  const syncNativeMenuLayout = (): void => {
+    void invoke("update_menu_check", { id: "layout:grid",      checked: canvasMode === "grid" });
+    void invoke("update_menu_check", { id: "layout:split",     checked: canvasMode === "split" });
+    void invoke("update_menu_check", { id: "layout:snap",      checked: shell.snap_enabled });
+    void invoke("update_menu_check", { id: "layout:show_grid", checked: shell.show_grid });
+  };
+
+  const syncNativeMenuPanels = (): void => {
+    for (const panel of canvasConfig.panels) {
+      void invoke("update_menu_check", { id: `apps:${panel.id}`, checked: openPanelIds.includes(panel.id) });
+    }
+  };
+
+  if (isMacOS()) {
+    await listen<string>("nulqor:menu-action", async (event) => {
+      const id = event.payload;
+
+      if (id === "settings:click_through") {
+        applyWindowPref("click_through");
+      } else if (id === "settings:always_on_top") {
+        applyWindowPref("always_on_top");
+      } else if (id === "settings:workbench_reset") {
+        try {
+          await invoke("core_invoke", { id: "workbench:reset@1", input: {} });
+          showShellToast("Workbench toggles reset.", { placement: "top" });
+        } catch (err) {
+          showShellToast(`Reset failed: ${err}`, { tone: "alert", placement: "top" });
+        }
+      } else if (id === "layout:grid") {
+        if (canvasMode !== "grid") {
+          const synced = syncGridLayoutsFromSplitTree(
+            splitState.tree, openPanelIds, panelLayouts,
+            (panelId, i) => defaultTile(panelId, i, gridMetrics),
+          );
+          openPanelIds = synced.openPanelIds;
+          Object.assign(panelLayouts, synced.panelLayouts);
+          canvasMode = "grid";
+          syncTilesFromLayouts();
+          activeProfileId = null;
+          persist();
+          void renderCanvas();
+          renderLayoutMenu();
+          syncNativeMenuLayout();
+        }
+      } else if (id === "layout:split") {
+        if (canvasMode !== "split") {
+          canvasMode = "split";
+          assignOpenPanelsToEmptyLeaves();
+          activeProfileId = null;
+          persist();
+          void renderCanvas();
+          renderLayoutMenu();
+          syncNativeMenuLayout();
+        }
+      } else if (id === "layout:snap") {
+        applyShellSetting("snap_enabled");
+        syncNativeMenuLayout();
+      } else if (id === "layout:show_grid") {
+        applyShellSetting("show_grid");
+        syncNativeMenuLayout();
+      } else if (id === "window:toggle_mode") {
+        await windowChrome.toggleFullscreen();
+      } else if (id.startsWith("apps:")) {
+        const panelId = id.slice("apps:".length);
+        const open = openPanelIds.includes(panelId);
+        if (!open) {
+          openPanelIds.push(panelId);
+          if (!panelLayouts[panelId]) {
+            panelLayouts[panelId] = defaultTile(panelId, openPanelIds.length - 1, gridMetrics);
+          }
+          if (canvasMode === "split") assignOpenPanelsToEmptyLeaves();
+        } else {
+          panelLayouts[panelId] = tiles.find((t) => t.id === panelId) ?? panelLayouts[panelId];
+          openPanelIds = openPanelIds.filter((pid) => pid !== panelId);
+          if (canvasMode === "split") {
+            splitState = { ...splitState, tree: removePanelFromTree(splitState.tree, panelId) };
+          }
+        }
+        syncTilesFromLayouts();
+        await renderCanvas();
+        renderAppsMenu();
+        renderLayoutMenu();
+        syncNativeMenuPanels();
+      }
+    });
+
+    // Prime the native menu with the current runtime state.
+    syncNativeMenuSettings();
+    syncNativeMenuLayout();
+    syncNativeMenuPanels();
+    void invoke("update_window_mode_label", { isFullscreen: windowMode === "fullscreen" });
+  }
 
   return {
     resyncWindowMode: async () => {

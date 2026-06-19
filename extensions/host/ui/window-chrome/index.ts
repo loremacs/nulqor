@@ -1,10 +1,11 @@
 import { detectHostPlatform } from "./platform";
 import type { HostPlatform, WindowChromeContext, WindowChromeHandle, WindowChromeStrategy } from "./types";
+import { macosWindowChrome } from "./macos";
 import { windowsWindowChrome } from "./windows";
 
 const STRATEGIES: Partial<Record<HostPlatform, WindowChromeStrategy>> = {
   windows: windowsWindowChrome,
-  // macos: macosWindowChrome — add when shipping macOS (traffic lights, AppleActionOnDoubleClick)
+  macos: macosWindowChrome,
   // linux: linuxWindowChrome — add when shipping Linux (optional WM tweaks)
 };
 

@@ -15,6 +15,7 @@ import {
   type WindowFrameState,
   type WindowSnapAnchor,
 } from "./types";
+import { isWindows } from "./platform";
 import {
   detectSnapAnchor,
   monitorWorkArea,
@@ -43,9 +44,12 @@ type ApplyGeometryOptions = {
 
 async function waitForPaint(frames = 2): Promise<void> {
   for (let i = 0; i < frames; i += 1) {
-    await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => resolve()),
-    );
+    // requestAnimationFrame is suppressed on hidden windows on macOS WKWebView,
+    // so fall back to setTimeout to avoid hanging before win.show() is called.
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(() => resolve(), 100);
+      requestAnimationFrame(() => { clearTimeout(t); resolve(); });
+    });
   }
 }
 
@@ -329,7 +333,16 @@ export async function captureWindowFrame(
   const pos = await win.outerPosition();
   const outerSize = await win.outerSize();
   const maximized = await win.isMaximized();
-  const monitor = await resolveMonitor(previous?.monitorName);
+  // Detect from actual window position — do NOT prefer stored monitorName here.
+  // If the user dragged the window to a different monitor, currentMonitor()
+  // reflects that; passing the stored name would return the old monitor instead.
+  const monitor =
+    (await currentMonitor()) ??
+    (await monitorFromPoint(
+      pos.x + Math.floor(outerSize.width / 2),
+      pos.y + Math.floor(outerSize.height / 2),
+    )) ??
+    (await primaryMonitor());
   let anchor: WindowSnapAnchor = "free";
   if (monitor) {
     anchor = detectSnapAnchor(
@@ -390,6 +403,7 @@ export async function applyWindowFrame(frame: WindowFrameState): Promise<void> {
 
 /** WebView2 on Windows only becomes transparent after a size change (alpha ignored). */
 async function nudgeWindowTransparency(): Promise<void> {
+  if (!isWindows()) return;
   const win = getCurrentWindow();
   const size = await win.innerSize();
   const scale = await win.scaleFactor();
