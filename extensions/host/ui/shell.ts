@@ -417,7 +417,7 @@ async function finishGridDragSession(
   resumeClickThrough();
   await clickThrough.flush();
   if (isMacOS()) {
-    clickThrough.deferPassThrough(250);
+    clickThrough.deferPassThrough(450);
   }
   clickThrough.refresh();
 }
@@ -433,17 +433,6 @@ export async function initShell(): Promise<ShellHandle> {
 
   if (isMacOS()) {
     document.documentElement.classList.add("platform-macos");
-    // macOS click-to-activate: only refocus when the webview does not already have
-    // focus. Calling setFocus on every pointerdown fights drag sessions and WKWebView.
-    document.addEventListener(
-      "pointerdown",
-      () => {
-        if (!document.hasFocus()) {
-          void getCurrentWindow().setFocus();
-        }
-      },
-      { capture: true, passive: true },
-    );
   }
 
   const canvasConfig = await fetchCanvasConfig();

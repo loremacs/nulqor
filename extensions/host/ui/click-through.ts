@@ -1,9 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 
+import { isMacOS } from "./platform";
+
 const INTERACTIVE_SELECTOR =
   ".menu-bar, .menu-bar-menus, .menu-window-controls, .panel-tile, .panel-resize-handle, .menu-dropdown:not([hidden]), .shell-modal-backdrop, .split-sash, .split-slot-edit-bar, .split-slot-edit-bar button";
+/** Panel drag handles need extra lead time — pass-through must be off before mousedown. */
+const PANEL_DRAG_SELECTOR = ".panel-tile-header, .panel-resize-handle";
 const POLL_MS = 16;
+/** macOS: delay re-enabling OS pass-through so panel clicks are not stolen by Finder. */
+const MACOS_PASS_THROUGH_ENABLE_MS = 180;
+const MACOS_PANEL_ARM_MS = 120;
+const MACOS_FOCUS_ARM_MS = 200;
 
 export type ClickThroughHandle = {
   refresh: () => void;
@@ -23,15 +31,21 @@ function isWindowedMode(): boolean {
   return shell?.dataset.windowMode === "windowed";
 }
 
-function isOverInteractive(clientX: number, clientY: number): boolean {
-  // Topmost element at the cursor — rect iteration misses z-order after panel
-  // reorder (appendChild on drag) and over-counts large tile bounds on macOS.
+function hitAt(clientX: number, clientY: number, selector: string): boolean {
   for (const el of document.elementsFromPoint(clientX, clientY)) {
-    if ((el as HTMLElement).closest(INTERACTIVE_SELECTOR)) {
+    if ((el as HTMLElement).closest(selector)) {
       return true;
     }
   }
   return false;
+}
+
+function isOverInteractive(clientX: number, clientY: number): boolean {
+  return hitAt(clientX, clientY, INTERACTIVE_SELECTOR);
+}
+
+function isOverPanelDragHandle(clientX: number, clientY: number): boolean {
+  return hitAt(clientX, clientY, PANEL_DRAG_SELECTOR);
 }
 
 async function cursorClientCss(): Promise<{ x: number; y: number } | null> {
@@ -79,9 +93,7 @@ export function mountClickThrough(
   let windowFocused = true;
   let pointerHeld = false;
   let passThroughDeferredUntil = 0;
-  // Window metrics change only on resize / DPI change. Cache them so the
-  // high-frequency poll does not make an innerSize + scaleFactor IPC round-trip
-  // every tick (cursor position is the only value that must be polled live).
+  let passThroughEnableTimer: ReturnType<typeof setTimeout> | null = null;
   let cachedInner: Awaited<ReturnType<typeof win.innerSize>> | null = null;
   let cachedScale = 1;
   const metricsUnlisten: Array<() => void> = [];
@@ -95,12 +107,6 @@ export function mountClickThrough(
     }
   };
 
-  // Serialize all setIgnoreCursorEvents IPC calls through a single promise
-  // chain.  This prevents the race where a slow `true` IPC completes after a
-  // fast `false` IPC, leaving the OS in pass-through while local `ignoring`
-  // thinks it is clickable.  Each task checks `ignoring` at execution time;
-  // superseded tasks (where `ignoring` no longer matches the queued value)
-  // are skipped, so only the last-requested state reaches the OS.
   let ipcChain: Promise<void> = Promise.resolve();
 
   const setIgnoring = (next: boolean): Promise<void> => {
@@ -108,7 +114,7 @@ export function mountClickThrough(
     ignoring = next;
     const intended = next;
     ipcChain = ipcChain.then(async () => {
-      if (disposed || ignoring !== intended) return; // superseded
+      if (disposed || ignoring !== intended) return;
       try {
         await win.setIgnoreCursorEvents(intended);
         if (intended) options.onPassThrough?.();
@@ -119,8 +125,30 @@ export function mountClickThrough(
     return ipcChain;
   };
 
+  const cancelPassThroughEnableTimer = (): void => {
+    if (passThroughEnableTimer !== null) {
+      clearTimeout(passThroughEnableTimer);
+      passThroughEnableTimer = null;
+    }
+  };
+
   const ensureClickable = async (): Promise<void> => {
+    cancelPassThroughEnableTimer();
     await setIgnoring(false);
+  };
+
+  const schedulePassThroughEnable = (): void => {
+    if (!isMacOS()) {
+      void setIgnoring(true);
+      return;
+    }
+    cancelPassThroughEnableTimer();
+    passThroughEnableTimer = setTimeout(() => {
+      passThroughEnableTimer = null;
+      if (disposed || !passThroughAllowed()) return;
+      if (pointerHeld || Date.now() < passThroughDeferredUntil) return;
+      void setIgnoring(true);
+    }, MACOS_PASS_THROUGH_ENABLE_MS);
   };
 
   const passThroughAllowed = (): boolean =>
@@ -143,6 +171,7 @@ export function mountClickThrough(
   const disablePassThrough = async (): Promise<void> => {
     stopPoll();
     pollFailures = 0;
+    cancelPassThroughEnableTimer();
     await ensureClickable();
   };
 
@@ -159,6 +188,28 @@ export function mountClickThrough(
     return document.hasFocus();
   };
 
+  const armInteractiveAt = (clientX: number, clientY: number): void => {
+    if (!passThroughAllowed()) return;
+
+    if (isOverInteractive(clientX, clientY)) {
+      cancelPassThroughEnableTimer();
+      void ensureClickable();
+
+      if (isMacOS()) {
+        const armMs = isOverPanelDragHandle(clientX, clientY)
+          ? MACOS_PANEL_ARM_MS
+          : 60;
+        passThroughDeferredUntil = Math.max(
+          passThroughDeferredUntil,
+          Date.now() + armMs,
+        );
+        if (isOverPanelDragHandle(clientX, clientY) && !document.hasFocus()) {
+          void win.setFocus();
+        }
+      }
+    }
+  };
+
   const apply = async (clientX: number, clientY: number): Promise<void> => {
     if (disposed || !passThroughAllowed()) {
       await ensureClickable();
@@ -166,19 +217,24 @@ export function mountClickThrough(
     }
 
     if (!(await isActiveForPassThrough())) {
+      cancelPassThroughEnableTimer();
       await ensureClickable();
       return;
     }
 
     const interactive = isOverInteractive(clientX, clientY);
-    if (
-      !interactive &&
-      (pointerHeld || Date.now() < passThroughDeferredUntil)
-    ) {
+    if (interactive) {
+      armInteractiveAt(clientX, clientY);
+      return;
+    }
+
+    if (pointerHeld || Date.now() < passThroughDeferredUntil) {
+      cancelPassThroughEnableTimer();
       await ensureClickable();
       return;
     }
-    await setIgnoring(!interactive);
+
+    schedulePassThroughEnable();
   };
 
   const updateFromPoll = async (): Promise<void> => {
@@ -188,6 +244,7 @@ export function mountClickThrough(
     }
 
     if (!(await isActiveForPassThrough())) {
+      cancelPassThroughEnableTimer();
       await ensureClickable();
       return;
     }
@@ -212,6 +269,7 @@ export function mountClickThrough(
         pos.x > logical.width ||
         pos.y > logical.height
       ) {
+        cancelPassThroughEnableTimer();
         await setIgnoring(true);
         return;
       }
@@ -222,11 +280,18 @@ export function mountClickThrough(
 
   const onMouseMove = (event: MouseEvent): void => {
     pollFailures = 0;
+    armInteractiveAt(event.clientX, event.clientY);
     void apply(event.clientX, event.clientY);
+  };
+
+  const onPointerMove = (event: PointerEvent): void => {
+    pollFailures = 0;
+    armInteractiveAt(event.clientX, event.clientY);
   };
 
   const onPointerDown = (): void => {
     pointerHeld = true;
+    cancelPassThroughEnableTimer();
     void ensureClickable();
   };
 
@@ -235,22 +300,13 @@ export function mountClickThrough(
   };
 
   document.addEventListener("mousemove", onMouseMove, { passive: true });
+  document.addEventListener("pointermove", onPointerMove, {
+    passive: true,
+    capture: true,
+  });
   document.addEventListener("pointerdown", onPointerDown, true);
   document.addEventListener("pointerup", onPointerUp, true);
   document.addEventListener("pointercancel", onPointerUp, true);
-
-  // macOS + click-through: pre-empt pass-through when entering interactive targets so
-  // the first click after a drag is not swallowed by the OS (click-to-activate).
-  document.addEventListener(
-    "pointerover",
-    (event) => {
-      const target = event.target as HTMLElement;
-      if (target.closest(INTERACTIVE_SELECTOR)) {
-        void ensureClickable();
-      }
-    },
-    { passive: true },
-  );
 
   const refresh = (): void => {
     if (!passThroughAllowed()) {
@@ -263,6 +319,7 @@ export function mountClickThrough(
   const suspend = (): (() => void) => {
     suspendCount += 1;
     stopPoll();
+    cancelPassThroughEnableTimer();
     void ensureClickable();
     return () => {
       suspendCount = Math.max(0, suspendCount - 1);
@@ -292,6 +349,7 @@ export function mountClickThrough(
   const forceClickable = (): void => {
     stopPoll();
     pollFailures = 0;
+    cancelPassThroughEnableTimer();
     void ensureClickable();
   };
 
@@ -299,12 +357,17 @@ export function mountClickThrough(
     windowFocused = false;
     pollFailures = 0;
     stopPoll();
+    cancelPassThroughEnableTimer();
     void ensureClickable();
   };
 
   const onWindowFocus = (): void => {
     windowFocused = true;
     pollFailures = 0;
+    cancelPassThroughEnableTimer();
+    if (isMacOS()) {
+      deferPassThrough(MACOS_FOCUS_ARM_MS);
+    }
     if (!passThroughAllowed()) {
       void ensureClickable();
       return;
@@ -318,6 +381,7 @@ export function mountClickThrough(
   let focusUnlisten: (() => void) | null = null;
 
   const flush = (): Promise<void> => {
+    cancelPassThroughEnableTimer();
     void ensureClickable();
     return ipcChain;
   };
@@ -327,16 +391,19 @@ export function mountClickThrough(
       passThroughDeferredUntil,
       Date.now() + ms,
     );
+    cancelPassThroughEnableTimer();
     void ensureClickable();
   };
 
   const dispose = (): void => {
     disposed = true;
     stopPoll();
+    cancelPassThroughEnableTimer();
     focusUnlisten?.();
     metricsUnlisten.forEach((u) => u());
     metricsUnlisten.length = 0;
     document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("pointermove", onPointerMove, true);
     document.removeEventListener("pointerdown", onPointerDown, true);
     document.removeEventListener("pointerup", onPointerUp, true);
     document.removeEventListener("pointercancel", onPointerUp, true);
@@ -384,5 +451,13 @@ export function mountClickThrough(
     void ensureClickable();
   }
 
-  return { refresh, suspend, setEnabled, forceClickable, flush, deferPassThrough, dispose };
+  return {
+    refresh,
+    suspend,
+    setEnabled,
+    forceClickable,
+    flush,
+    deferPassThrough,
+    dispose,
+  };
 }
