@@ -378,6 +378,15 @@ export async function initShell(): Promise<ShellHandle> {
 
   if (isMacOS()) {
     document.documentElement.classList.add("platform-macos");
+    // macOS: re-activate the app on every pointer interaction so the native menu bar
+    // shows "Nulqor" and click-to-activate doesn't silently consume panel interactions.
+    // This fires only when the webview actually receives the event (i.e. setIgnoreCursorEvents
+    // is false), so click-through interactions still correctly activate the underlying app.
+    document.addEventListener(
+      "pointerdown",
+      () => { void getCurrentWindow().setFocus(); },
+      { capture: true, passive: true },
+    );
   }
 
   const canvasConfig = await fetchCanvasConfig();
@@ -1736,9 +1745,6 @@ export async function initShell(): Promise<ShellHandle> {
       desktop.appendChild(tileEl);
       syncPanelStackOrder(id);
       event.preventDefault();
-      // Capture the pointer so WKWebView (macOS) reliably delivers pointermove/pointerup
-      // to the document listener even when the cursor passes over pointer-events:none areas.
-      target.setPointerCapture(event.pointerId);
       const resumeClickThrough = clickThrough.suspend();
       trackPointerSession(
         (moveEvent) => applyResize(moveEvent.clientX, moveEvent.clientY),
@@ -1753,8 +1759,17 @@ export async function initShell(): Promise<ShellHandle> {
       return;
     }
 
-    if (!target.closest(".panel-tile-header")) return;
-    const tileEl = target.closest<HTMLElement>(".panel-tile");
+    // Prefer the direct target's header; fall back to elementsFromPoint so that
+    // a tile whose body overlaps another tile's header can still be dragged.
+    let headerEl = target.closest<HTMLElement>(".panel-tile-header");
+    if (!headerEl) {
+      for (const el of document.elementsFromPoint(event.clientX, event.clientY)) {
+        const h = (el as HTMLElement).closest<HTMLElement>(".panel-tile-header");
+        if (h) { headerEl = h; break; }
+      }
+    }
+    if (!headerEl) return;
+    const tileEl = headerEl.closest<HTMLElement>(".panel-tile");
     if (!tileEl) return;
     const id = tileEl.dataset.panelId!;
     const tileRect = tileEl.getBoundingClientRect();
@@ -1766,9 +1781,6 @@ export async function initShell(): Promise<ShellHandle> {
     };
     raiseGridPanel(tileEl, id);
     event.preventDefault();
-    // Capture the pointer so WKWebView (macOS) reliably delivers pointermove/pointerup
-    // to the document listener even when the cursor passes over pointer-events:none areas.
-    target.setPointerCapture(event.pointerId);
     const resumeClickThrough = clickThrough.suspend();
     trackPointerSession(
       (moveEvent) => {
@@ -1799,6 +1811,24 @@ export async function initShell(): Promise<ShellHandle> {
                 gridMetrics,
               )
             : positionTileFromPointer(endEvent.clientX, endEvent.clientY);
+        // In snap mode, reject positions that would overlap another tile. Snap
+        // back to the original position so the tile remains independently draggable.
+        if (resolved && shell.snap_enabled) {
+          const dragId = tileDrag!.id;
+          const overlaps = tiles.some((t) => {
+            if (t.id === dragId) return false;
+            return (
+              resolved!.col < t.col + t.colSpan &&
+              resolved!.col + resolved!.colSpan > t.col &&
+              resolved!.row < t.row + t.rowSpan &&
+              resolved!.row + resolved!.rowSpan > t.row
+            );
+          });
+          if (overlaps) {
+            applyTileToElement(tileDrag!.el, dragged, shell, gridMetrics);
+            resolved = null;
+          }
+        }
         if (resolved) {
           tiles = tiles.map((t) => (t.id === tileDrag!.id ? resolved! : t));
           panelLayouts[resolved.id] = resolved;

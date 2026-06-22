@@ -1204,10 +1204,6 @@ html.nulqor-startup-hidden .nulqor-shell[data-window-mode="windowed"] {
   cursor: grabbing !important;
 }
 
-/* Higher specificity (0,3,0) beats .nulqor-shell .panel-tile (0,2,0) */
-.nulqor-shell .panel-tile.panel-tile-dragging {
-  pointer-events: none;
-}
 
 .panel-tile-dragging .panel-tile-header {
   cursor: grabbing !important;
