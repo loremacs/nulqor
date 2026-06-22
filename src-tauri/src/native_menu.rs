@@ -44,11 +44,17 @@ pub fn build_and_install(
         app, "settings:workbench_reset", "Reset Workbench Toggles",
         true, None::<&str>,
     )?;
+    let exit = MenuItem::with_id(
+        app, "settings:exit", "Exit",
+        true, None::<&str>,
+    )?;
     let settings_sub = Submenu::with_items(app, "Settings", true, &[
         &click_through,
         &always_on_top,
         &PredefinedMenuItem::separator(app)?,
         &workbench_reset,
+        &PredefinedMenuItem::separator(app)?,
+        &exit,
     ])?;
 
     // Layout

@@ -21,16 +21,23 @@ Read installed versions when it matters: `node -v`, `rustc -V`, `cargo -V`.
 
 ## Verify after edits
 
-From repo root, run what applies:
+From repo root, run what applies (same commands on Windows, macOS, and Linux):
 
 ```powershell
 npx tsc --noEmit          # TypeScript panel UI
 cargo check --workspace   # Rust
+npm start                 # smoke — must work on every OS (via scripts/start-dev.mjs)
 skills/audit-skill/scripts/audit.ps1 -SkillName <name> -Quiet   # skill changes
 skills/audit-project/scripts/audit.ps1 -Quiet                          # layout / extensions
 ```
 
 For a full edit loop, load skill `edit-and-verify`.
+
+## Multi-platform
+
+- **Default paths must work on all OSes.** Guard macOS/Windows/Linux-only behavior — see `AGENTS.md` § Multi-platform targeting.
+- **Never** put OS-specific shell commands in `package.json` `start`; use `scripts/start-dev.mjs`.
+- Host UI: `isMacOS()` / `isWindows()` from `extensions/host/ui/platform.ts`; Rust: `#[cfg(target_os = "...")]`.
 
 ## Dependencies
 

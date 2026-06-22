@@ -15,7 +15,7 @@ import {
   type WindowFrameState,
   type WindowSnapAnchor,
 } from "./types";
-import { isWindows } from "./platform";
+import { isMacOS } from "./platform";
 import {
   detectSnapAnchor,
   monitorWorkArea,
@@ -32,6 +32,47 @@ export const DEFAULT_WINDOWED_FRAME: WindowFrameState = {
   anchor: "free",
 };
 
+/** Reject dev/HMR stub geometry and off-screen coordinates persisted by mistake. */
+export const MIN_WINDOWED_WIDTH = 400;
+export const MIN_WINDOWED_HEIGHT = 300;
+const OFF_SCREEN_COORD = -10_000;
+
+export function isPlausibleWindowFrame(
+  frame: WindowFrameState | null | undefined,
+): boolean {
+  if (!frame) return false;
+  if (frame.mode === "fullscreen") return true;
+  if (frame.width < MIN_WINDOWED_WIDTH || frame.height < MIN_WINDOWED_HEIGHT) {
+    return false;
+  }
+  if (frame.x < OFF_SCREEN_COORD || frame.y < OFF_SCREEN_COORD) {
+    return false;
+  }
+  return true;
+}
+
+export function sanitizeWindowFrame(
+  frame: WindowFrameState | null | undefined,
+): WindowFrameState | null {
+  if (!frame) return null;
+  return isPlausibleWindowFrame(frame) ? frame : null;
+}
+
+function overlayFrameFallback(
+  previous: WindowFrameState | null,
+  priorWindowed: WindowFrameState,
+): WindowFrameState {
+  if (previous?.mode === "fullscreen") return previous;
+  return {
+    mode: "fullscreen",
+    width: priorWindowed.width,
+    height: priorWindowed.height,
+    x: priorWindowed.x,
+    y: priorWindowed.y,
+    anchor: priorWindowed.anchor,
+    monitorName: priorWindowed.monitorName,
+  };
+}
 const POSITION_MATCH_TOLERANCE_PX = 28;
 const SIZE_MATCH_TOLERANCE_PX = 4;
 /** Overlay covers monitor work area — outer size can differ slightly from inner. */
@@ -82,7 +123,15 @@ export function loadWindowFrame(): WindowFrameState | null {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PersistedShellState;
-    return parsed.windowFrame ?? null;
+    const frame = parsed.windowFrame ?? null;
+    const sanitized = sanitizeWindowFrame(frame);
+    if (frame && !sanitized) {
+      console.warn(
+        "[window-frame] ignoring implausible saved frame",
+        frame,
+      );
+    }
+    return sanitized;
   } catch {
     return null;
   }
@@ -366,6 +415,32 @@ async function ensureWindowOnScreen(): Promise<void> {
   }
 }
 
+async function repairUndersizedWindow(
+  frame: WindowFrameState | null,
+): Promise<void> {
+  const win = getCurrentWindow();
+  const size = await win.innerSize();
+  const scale = await win.scaleFactor();
+  const logical = size.toLogical(scale);
+  if (
+    logical.width >= MIN_WINDOWED_WIDTH &&
+    logical.height >= MIN_WINDOWED_HEIGHT
+  ) {
+    return;
+  }
+  console.warn(
+    "[window-frame] repairing undersized window",
+    logical.width,
+    "x",
+    logical.height,
+  );
+  if (frame?.mode === "windowed") {
+    await applyWindowedGeometry({ ...DEFAULT_WINDOWED_FRAME });
+  } else {
+    await applyOverlayFrame(frame?.monitorName);
+  }
+}
+
 export async function captureWindowFrame(
   previous: WindowFrameState | null = null,
 ): Promise<WindowFrameState> {
@@ -385,11 +460,30 @@ export async function captureWindowFrame(
     };
   }
 
+  // Never persist the 1×1 off-screen stub or pre-show hidden geometry.
+  if (
+    document.documentElement.classList.contains("nulqor-startup-hidden") ||
+    !(await win.isVisible())
+  ) {
+    return overlayFrameFallback(previous, priorWindowed);
+  }
+
   const size = await win.innerSize();
   const scale = await win.scaleFactor();
   const logical = size.toLogical(scale);
   const pos = await win.outerPosition();
   const outerSize = await win.outerSize();
+
+  if (!isPlausibleWindowFrame({
+    mode: "windowed",
+    width: Math.round(logical.width),
+    height: Math.round(logical.height),
+    x: pos.x,
+    y: pos.y,
+  })) {
+    return overlayFrameFallback(previous, priorWindowed);
+  }
+
   const maximized = await win.isMaximized();
   // Detect from actual window position — do NOT prefer stored monitorName here.
   // If the user dragged the window to a different monitor, currentMonitor()
@@ -460,9 +554,8 @@ export async function applyWindowFrame(frame: WindowFrameState): Promise<void> {
   await primeWindowedNativeBackground();
 }
 
-/** WebView2 on Windows only becomes transparent after a size change (alpha ignored). */
+/** WebView compositing wake — 1px resize nudge after show/overlay apply. */
 async function nudgeWindowTransparency(): Promise<void> {
-  if (!isWindows()) return;
   const win = getCurrentWindow();
   const size = await win.innerSize();
   const scale = await win.scaleFactor();
@@ -501,18 +594,19 @@ export async function primeNativeBackgroundForMode(
 export async function applyStartupGeometry(
   frame: WindowFrameState | null,
 ): Promise<void> {
-  if (frame) {
-    if (!(await frameMatchesApplied(frame))) {
-      await applyFrameHidden(frame);
+  const sanitized = sanitizeWindowFrame(frame);
+  if (sanitized) {
+    if (!(await frameMatchesApplied(sanitized))) {
+      await applyFrameHidden(sanitized);
     } else {
-      await primeNativeBackgroundForMode(frame.mode);
+      await primeNativeBackgroundForMode(sanitized.mode);
     }
   } else {
     await applyDefaultFirstRunFrame();
   }
+  await repairUndersizedWindow(sanitized);
   // Windowed mode only: verify the window actually landed on a visible monitor.
-  // Catches stale off-screen coordinates from a disconnected external display.
-  if (!frame || frame.mode === "windowed") {
+  if (sanitized?.mode === "windowed") {
     await ensureWindowOnScreen();
   }
 }
@@ -523,20 +617,21 @@ export async function showShellWindow(
 ): Promise<void> {
   const win = getCurrentWindow();
   const windowed = frame?.mode === "windowed";
+  const overlay = !windowed;
 
-  if (windowed) {
-    await waitForPaint(3);
-  }
+  // WKWebView may suppress rAF while hidden — allow extra paint ticks on macOS overlay.
+  await waitForPaint(windowed ? 3 : isMacOS() ? 2 : 1);
 
   if (!(await win.isVisible())) {
     await win.show();
   }
 
-  await waitForPaint(windowed ? 2 : 1);
+  await waitForPaint(windowed ? 2 : isMacOS() ? 3 : 1);
   markShellVisible();
-  if (!windowed) {
+  if (overlay) {
     await nudgeWindowTransparency();
   }
+  await repairUndersizedWindow(sanitizeWindowFrame(frame));
 }
 
 /**

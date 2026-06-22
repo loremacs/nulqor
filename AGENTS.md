@@ -138,22 +138,35 @@ Each main content area has an `index.md` that lists what lives there. **Read the
 
 Nulqor targets **macOS, Windows, and Linux**. The codebase must remain cross-platform at all times.
 
+**When developing on a specific OS, test on that OS — but never break the others.** A macOS fix that breaks `npm start` on Windows (or vice versa) is not shippable. Platform-specific behavior must be guarded; the default path must work everywhere.
+
 **When developing on a specific OS, focus testing on that OS** — platform-specific bugs should be reproduced and fixed against the current platform before shipping.
+
+### Dev startup (all platforms)
+
+```powershell
+npm install
+npm start    # runs scripts/start-dev.mjs → tauri dev (OS-aware stale-process cleanup)
+```
+
+Do **not** put macOS-only shell commands (`lsof`, `pkill`, …) in `package.json` `start` — use `scripts/start-dev.mjs` which branches on `process.platform`.
 
 ### Platform guards
 
 | Layer | How to branch |
 |---|---|
 | Rust | `#[cfg(target_os = "macos")]`, `#[cfg(target_os = "windows")]` |
-| TypeScript | `isMacOS()` from `extensions/host/ui/platform.ts` |
+| TypeScript | `isMacOS()`, `isWindows()` from `extensions/host/ui/platform.ts` |
+| npm scripts | `scripts/start-dev.mjs` (Node `process.platform`) |
 | CSS | `.platform-macos` class on `<html>` (set at init in `shell.ts`) |
 
 Never add a Windows-only or macOS-only workaround as the default path — always use a platform guard and handle the fallback.
 
-### macOS-specific notes (primary dev OS as of June 2026)
+### macOS-specific notes
 
-- **Native menu bar** (`src-tauri/src/native_menu.rs`): JS dropdowns are hidden on macOS (`display:none` via `.platform-macos .menu-bar-menus`); state changes must sync via `update_menu_check` IPC.
+- **Native menu bar** (`src-tauri/src/native_menu.rs`): JS dropdowns are hidden on macOS (`display:none` via `.platform-macos .menu-bar-menus`); state changes must sync via `update_menu_check` IPC (guard all calls with `isMacOS()`).
 - **Window chrome** (`extensions/host/ui/window-chrome/macos.ts`): Traffic-light buttons, leading order. See `chrome-mount.ts` for shared logic.
-- **`startDragging()` deactivates the app**: On macOS, native window drag hands app activation to the system. `chrome-mount.ts` listens for `onFocusChanged` after `startDragging()` and calls `setFocus()` to restore activation. Without this, the menu bar shows Finder and subsequent panel clicks require a "click-to-activate" first (macOS first-click activates the window without delivering `pointerdown` to the webview).
-- **Panel drag / WKWebView pointer events**: Always call `target.setPointerCapture(event.pointerId)` before starting a drag session. Without it, WKWebView may stop delivering `pointermove`/`pointerup` when the cursor passes over `pointer-events:none` areas.
-- **Click-through**: `setIgnoreCursorEvents` is async IPC. The 16 ms poll keeps it current; `suspend()`/`resume()` brackets any drag or edit operation.
+- **`startDragging()` deactivates the app**: On macOS, native window drag hands app activation to the system. `chrome-mount.ts` listens for `onFocusChanged` after `startDragging()` and calls `setFocus()` to restore activation. Do not call `setFocus()` on every `pointerdown` — only when `!document.hasFocus()`.
+- **Panel drag / WKWebView pointer events**: Always call `setPointerCapture(event.pointerId)` on the drag handle before starting a drag session (grid and split). Without it, WKWebView may stop delivering `pointermove`/`pointerup` when the cursor passes over `pointer-events:none` areas, and leaked listeners break subsequent drags.
+- **Click-through**: `setIgnoreCursorEvents` is async IPC. The 16 ms poll keeps it current; `suspend()`/`resume()` brackets any drag or edit operation. Use `pointerover` on interactive targets to pre-empt pass-through before click-to-activate swallows the first click.
+- **Overlay startup**: `showShellWindow` uses extra paint ticks + resize nudge on macOS so WKWebView compositing shows the transparent shell correctly.

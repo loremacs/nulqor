@@ -16,10 +16,16 @@ Local-first, extensible construction platform. Frozen Rust core + replaceable ex
 
 ## Build and run
 
+Nulqor is developed and run on **Windows, macOS, and Linux**. Use the same commands on every OS:
+
 ```powershell
 npm install
-npm start          # tauri dev — opens window titled "Nulqor"
+npm start          # cross-platform — scripts/start-dev.mjs then tauri dev
 ```
+
+`npm start` must never assume a single OS (no bare `lsof`/`pkill` in `package.json`). Platform-specific cleanup lives in `scripts/start-dev.mjs`.
+
+**Agents:** when adding npm scripts, shell helpers, or dev tooling, branch on OS or use Node/cross-platform tools. Read [`AGENTS.md`](AGENTS.md) § Multi-platform targeting before OS-specific changes.
 
 ## Startup profile (`nulqor.toml`)
 

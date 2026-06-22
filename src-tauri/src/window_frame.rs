@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, WebviewWindow};
 
 const SNAP_ABS_TOLERANCE_PX: i32 = 28;
+const MIN_WINDOWED_WIDTH: f64 = 400.0;
+const MIN_WINDOWED_HEIGHT: f64 = 300.0;
+const OFF_SCREEN_COORD: i32 = -10_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,10 +46,31 @@ pub fn path_for(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 pub fn load(app: &AppHandle) -> Option<WindowFramePersist> {
     let path = path_for(app).ok()?;
     let raw = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&raw).ok()
+    let frame: WindowFramePersist = serde_json::from_str(&raw).ok()?;
+    if !is_plausible(&frame) {
+        eprintln!(
+            "[window-frame] ignoring implausible saved frame ({:?} {}x{} @ {}, {})",
+            frame.mode, frame.width, frame.height, frame.x, frame.y
+        );
+        return None;
+    }
+    Some(frame)
+}
+
+fn is_plausible(frame: &WindowFramePersist) -> bool {
+    if frame.mode == "fullscreen" {
+        return true;
+    }
+    frame.width >= MIN_WINDOWED_WIDTH
+        && frame.height >= MIN_WINDOWED_HEIGHT
+        && frame.x > OFF_SCREEN_COORD
+        && frame.y > OFF_SCREEN_COORD
 }
 
 pub fn save(app: &AppHandle, frame: &WindowFramePersist) -> Result<(), String> {
+    if !is_plausible(frame) {
+        return Ok(());
+    }
     let path = path_for(app)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -250,5 +274,19 @@ mod tests {
         let snap = snap_position("left", &wa).unwrap();
         assert!(near_px(snap.x, 100));
         assert!(near_px(snap.y, 50));
+    }
+
+    #[test]
+    fn rejects_implausible_windowed_frame() {
+        let bad = WindowFramePersist {
+            mode: "windowed".into(),
+            width: 158.0,
+            height: 26.0,
+            x: -32000,
+            y: -32000,
+            anchor: None,
+            monitor_name: None,
+        };
+        assert!(!is_plausible(&bad));
     }
 }

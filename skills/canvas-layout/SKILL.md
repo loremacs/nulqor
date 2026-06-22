@@ -71,6 +71,7 @@ validation:   npx tsc --noEmit; manual layout checklist in REFERENCE.md when UX 
 5. **Sub-grid CSS vars** — `updateGridGeometry(..., cssScope: gridHost)` so sub-grid drags do not repaint unrelated panels.
 6. **Intra sub-grid drag** — While pointer is inside the sub-grid host, reposition locally; cross-slot targeting only when pointer leaves that host.
 7. **Grid stack** — Dragging raises panel (`panel-tile-dragging`, `z-index: 10`, `appendChild`, sync `openPanelIds` order).
+8. **Pointer capture** — Grid drags in `shell.ts` and split drags in `split-render.ts` must call `setPointerCapture(pointerId)` on the drag handle (required on WKWebView/macOS; safe on all platforms).
 
 Details and failure modes: [REFERENCE.md](REFERENCE.md).
 

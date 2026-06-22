@@ -229,6 +229,19 @@ export function mountClickThrough(
   document.addEventListener("mousemove", onMouseMove, { passive: true });
   document.addEventListener("pointerdown", onPointerDown, true);
 
+  // macOS + click-through: pre-empt pass-through when entering interactive targets so
+  // the first click after a drag is not swallowed by the OS (click-to-activate).
+  document.addEventListener(
+    "pointerover",
+    (event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest(INTERACTIVE_SELECTOR)) {
+        void ensureClickable();
+      }
+    },
+    { passive: true },
+  );
+
   const refresh = (): void => {
     if (!passThroughAllowed()) {
       void ensureClickable();

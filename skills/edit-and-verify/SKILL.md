@@ -42,7 +42,7 @@ validation:   applicable verifiers run; failures reported with full output
 
 1. Read [`AGENTS.md`](../../AGENTS.md), [`README.md`](../../README.md), and target files.
 
-2. Make a minimal diff.
+2. Make a minimal diff. **If the change is OS-specific**, use platform guards (`AGENTS.md` § Multi-platform targeting) — do not break other OSes.
 
 3. Run verifiers:
 

@@ -74,6 +74,7 @@ import {
   captureWindowFrame,
   DEFAULT_WINDOWED_FRAME,
   primeNativeBackgroundForMode,
+  sanitizeWindowFrame,
   syncWindowFrameToDisk,
 } from "./window-frame";
 import { mountWindowResize } from "./window-resize";
@@ -138,6 +139,9 @@ function loadPersisted(): PersistedShellState | null {
     parsed.layoutEditing = false;
     if (parsed.canvasMode === "split" && !parsed.split) {
       parsed.split = defaultSplitState("two-columns");
+    }
+    if (parsed.windowFrame) {
+      parsed.windowFrame = sanitizeWindowFrame(parsed.windowFrame) ?? undefined;
     }
     return parsed;
   } catch {
@@ -350,21 +354,50 @@ function trackPointerSession(
   onMove: (event: PointerEvent) => void,
   onEnd: (event: PointerEvent) => void,
   pointerId?: number,
-): void {
-  const move = (event: PointerEvent): void => {
-    if (pointerId !== undefined && event.pointerId !== pointerId) return;
-    onMove(event);
-  };
-  const end = (event: PointerEvent): void => {
-    if (pointerId !== undefined && event.pointerId !== pointerId) return;
+  captureTarget?: Element | null,
+): () => void {
+  let ended = false;
+
+  const cleanup = (): void => {
     document.removeEventListener("pointermove", move);
     document.removeEventListener("pointerup", end);
     document.removeEventListener("pointercancel", end);
+    if (captureTarget && pointerId !== undefined) {
+      try {
+        captureTarget.releasePointerCapture(pointerId);
+      } catch {
+        /* already released */
+      }
+    }
+  };
+
+  const move = (event: PointerEvent): void => {
+    if (ended) return;
+    if (pointerId !== undefined && event.pointerId !== pointerId) return;
+    onMove(event);
+  };
+
+  const end = (event: PointerEvent): void => {
+    if (ended) return;
+    if (pointerId !== undefined && event.pointerId !== pointerId) return;
+    ended = true;
+    cleanup();
     onEnd(event);
   };
+
+  if (captureTarget && pointerId !== undefined) {
+    try {
+      captureTarget.setPointerCapture(pointerId);
+    } catch (err) {
+      console.warn("[host] setPointerCapture failed:", err);
+    }
+  }
+
   document.addEventListener("pointermove", move);
   document.addEventListener("pointerup", end);
   document.addEventListener("pointercancel", end);
+
+  return cleanup;
 }
 
 export type ShellHandle = {
@@ -378,13 +411,15 @@ export async function initShell(): Promise<ShellHandle> {
 
   if (isMacOS()) {
     document.documentElement.classList.add("platform-macos");
-    // macOS: re-activate the app on every pointer interaction so the native menu bar
-    // shows "Nulqor" and click-to-activate doesn't silently consume panel interactions.
-    // This fires only when the webview actually receives the event (i.e. setIgnoreCursorEvents
-    // is false), so click-through interactions still correctly activate the underlying app.
+    // macOS click-to-activate: only refocus when the webview does not already have
+    // focus. Calling setFocus on every pointerdown fights drag sessions and WKWebView.
     document.addEventListener(
       "pointerdown",
-      () => { void getCurrentWindow().setFocus(); },
+      () => {
+        if (!document.hasFocus()) {
+          void getCurrentWindow().setFocus();
+        }
+      },
       { capture: true, passive: true },
     );
   }
@@ -416,10 +451,11 @@ export async function initShell(): Promise<ShellHandle> {
   }
 
   let menuDock: MenuDock = isMacOS() ? "top" : (persisted?.menuDock ?? "top");
+  const persistedFrame = sanitizeWindowFrame(persisted?.windowFrame ?? null);
   let windowMode: "fullscreen" | "windowed" =
-    persisted?.windowFrame?.mode ?? "fullscreen";
+    persistedFrame?.mode ?? "fullscreen";
   let windowFrame: WindowFrameState =
-    persisted?.windowFrame ??
+    persistedFrame ??
     (windowMode === "windowed"
       ? { ...DEFAULT_WINDOWED_FRAME }
       : { mode: "fullscreen", width: 1280, height: 720, x: 0, y: 0 });
@@ -473,6 +509,11 @@ export async function initShell(): Promise<ShellHandle> {
               <button type="button" class="menu-dropdown-row" data-action="workbench-reset" title="Clears all Workbench enable/disable toggles for extensions, skills, rules, and agents. Does not change files or nulqor.toml.">
                 <span class="menu-dropdown-gutter" aria-hidden="true"></span>
                 <span class="menu-dropdown-text">Reset Workbench toggles</span>
+              </button>
+              <div class="menu-dropdown-separator" role="separator"></div>
+              <button type="button" class="menu-dropdown-row" data-action="exit" role="menuitem">
+                <span class="menu-dropdown-gutter" aria-hidden="true"></span>
+                <span class="menu-dropdown-text">Exit</span>
               </button>
             </div>
           </div>
@@ -1393,7 +1434,19 @@ export async function initShell(): Promise<ShellHandle> {
     syncClickThrough();
   });
 
+  const requestAppExit = (): void => {
+    void getCurrentWindow().close();
+  };
+
   settingsPanel.addEventListener("click", (event) => {
+    const exitRow = (event.target as HTMLElement).closest<HTMLButtonElement>(
+      "[data-action='exit']",
+    );
+    if (exitRow) {
+      requestAppExit();
+      return;
+    }
+
     const actionRow = (event.target as HTMLElement).closest<HTMLButtonElement>(
       "[data-action='workbench-reset']",
     );
@@ -1755,6 +1808,7 @@ export async function initShell(): Promise<ShellHandle> {
           syncClickThrough();
         },
         event.pointerId,
+        handle,
       );
       return;
     }
@@ -1840,6 +1894,7 @@ export async function initShell(): Promise<ShellHandle> {
         syncClickThrough();
       },
       event.pointerId,
+      headerEl,
     );
   });
 
@@ -1891,6 +1946,8 @@ export async function initShell(): Promise<ShellHandle> {
         } catch (err) {
           showShellToast(`Reset failed: ${err}`, { tone: "alert", placement: "top" });
         }
+      } else if (id === "settings:exit") {
+        requestAppExit();
       } else if (id === "layout:grid") {
         if (canvasMode !== "grid") {
           const synced = syncGridLayoutsFromSplitTree(
@@ -1905,8 +1962,8 @@ export async function initShell(): Promise<ShellHandle> {
           persist();
           void renderCanvas();
           renderLayoutMenu();
-          syncNativeMenuLayout();
         }
+        syncNativeMenuLayout();
       } else if (id === "layout:split") {
         if (canvasMode !== "split") {
           canvasMode = "split";
@@ -1915,8 +1972,8 @@ export async function initShell(): Promise<ShellHandle> {
           persist();
           void renderCanvas();
           renderLayoutMenu();
-          syncNativeMenuLayout();
         }
+        syncNativeMenuLayout();
       } else if (id === "layout:snap") {
         applyShellSetting("snap_enabled");
         syncNativeMenuLayout();

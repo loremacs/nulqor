@@ -39,6 +39,13 @@ review. Mechanical equivalents run in `skills/audit-project/scripts/audit.ps1 -S
 
 ## Docs stay consistent
 
+- When shipping host/canvas behavior, update `docs/PROJECT_FEATURES.md` in the same session.
 - When you change phase status or the core-responsibility count, update `docs/PHASES.md`,
   `TASKS.md`, `docs/GOAL.md`, `docs/DESIGN.md §2`, and `docs/decisions/001` together. The audit
   fails on drift between them under `-Strict`.
+
+## Multi-platform
+
+- Nulqor runs on **Windows, macOS, and Linux**. OS-specific fixes must use platform guards — never replace the cross-platform default path.
+- `npm start` goes through `scripts/start-dev.mjs`; do not add bare `lsof`, `pkill`, or PowerShell-only commands to shared npm scripts.
+- Before merging OS-specific host UI work, confirm `npm start` still works on at least one other platform (or document why the change is guard-only).
