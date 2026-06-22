@@ -918,6 +918,7 @@ html.nulqor-startup-hidden .nulqor-shell[data-window-mode="windowed"] {
   font-size: 0.85rem;
   font-weight: 600;
   flex-shrink: 0;
+  touch-action: none;
 }
 
 .panel-tile-header:active {
@@ -1201,6 +1202,10 @@ html.nulqor-startup-hidden .nulqor-shell[data-window-mode="windowed"] {
   z-index: 20;
   opacity: 0.65;
   cursor: grabbing !important;
+}
+
+/* Higher specificity (0,3,0) beats .nulqor-shell .panel-tile (0,2,0) */
+.nulqor-shell .panel-tile.panel-tile-dragging {
   pointer-events: none;
 }
 

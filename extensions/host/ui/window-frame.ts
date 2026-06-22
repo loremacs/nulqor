@@ -105,7 +105,9 @@ export function getWindowedRestoreTarget(
 ): WindowFrameState {
   if (!frame) return { ...DEFAULT_WINDOWED_FRAME };
   if (frame.mode === "windowed") return frame;
-  if (frame.width > 0 && frame.height > 0 && frame.x >= 0 && frame.y >= 0) {
+  // -1,-1 is the sentinel for "no saved position". Real second-screen positions
+  // can have negative x/y (monitors to the left or above the primary).
+  if (frame.width > 0 && frame.height > 0 && !(frame.x === -1 && frame.y === -1)) {
     return {
       mode: "windowed",
       width: frame.width,
@@ -143,6 +145,11 @@ async function resolveMonitor(
   return primaryMonitor();
 }
 
+async function isMonitorAvailable(name: string): Promise<boolean> {
+  const monitors = await availableMonitors();
+  return monitors.some((m) => m.name === name);
+}
+
 async function resolveTargetGeometry(
   target: WindowFrameState,
 ): Promise<{ size: LogicalSize; position: PhysicalPosition | null }> {
@@ -166,7 +173,17 @@ async function resolveTargetGeometry(
     };
   }
 
-  if (target.x < 0 || target.y < 0) {
+  // -1,-1 is the sentinel for "no saved position, center instead".
+  if (target.x === -1 && target.y === -1) {
+    return {
+      size: new LogicalSize(target.width, target.height),
+      position: null,
+    };
+  }
+
+  // If the position was saved on a named monitor that's no longer connected,
+  // the coordinates would be off-screen — center on the current monitor instead.
+  if (target.monitorName && !(await isMonitorAvailable(target.monitorName))) {
     return {
       size: new LogicalSize(target.width, target.height),
       position: null,
@@ -184,14 +201,8 @@ async function setWindowPosition(
   options?: ApplyGeometryOptions,
 ): Promise<void> {
   const win = getCurrentWindow();
-  const scale = window.devicePixelRatio || 1;
-  const screenW = window.screen.availWidth * scale;
-  const screenH = window.screen.availHeight * scale;
-  const x = position.x;
-  const y = position.y;
-  if (!(x >= 0 && y >= 0 && x < screenW && y < screenH)) {
-    return;
-  }
+  // Do not clamp by primary-monitor bounds — secondary monitors can have negative
+  // x/y (left of / above the primary). Trust the caller to provide a valid position.
   await win.setPosition(position);
   if (options?.startup) {
     await win.setPosition(position);
@@ -316,6 +327,45 @@ async function applyDefaultFirstRunFrame(): Promise<void> {
   await applyOverlayFrame();
 }
 
+/**
+ * Ensure the window is visible and its title bar is reachable:
+ * - If the window center is not on any monitor, center it.
+ * - If the window top is above the work area (behind menu bar / off-screen),
+ *   clamp it down to the work area top.
+ * Runs at startup and on every windowed-mode transition.
+ */
+async function ensureWindowOnScreen(): Promise<void> {
+  const win = getCurrentWindow();
+  const [pos, size, monitors] = await Promise.all([
+    win.outerPosition(),
+    win.outerSize(),
+    availableMonitors(),
+  ]);
+  if (monitors.length === 0) return;
+
+  const centerX = pos.x + Math.floor(size.width / 2);
+  const centerY = pos.y + Math.floor(size.height / 2);
+
+  const host = monitors.find(
+    (m) =>
+      centerX >= m.position.x &&
+      centerX < m.position.x + m.size.width &&
+      centerY >= m.position.y &&
+      centerY < m.position.y + m.size.height,
+  );
+
+  if (!host) {
+    await win.center();
+    return;
+  }
+
+  // Clamp top of window to the work area so the title bar is always reachable.
+  const wa = monitorWorkArea(host);
+  if (pos.y < wa.position.y) {
+    await win.setPosition(new PhysicalPosition(pos.x, wa.position.y));
+  }
+}
+
 export async function captureWindowFrame(
   previous: WindowFrameState | null = null,
 ): Promise<WindowFrameState> {
@@ -391,6 +441,7 @@ async function applyWindowedGeometry(
     return;
   }
   await setWindowPosition(geometry.position, options);
+  await ensureWindowOnScreen();
 }
 
 export async function applyWindowedFrame(
@@ -458,6 +509,11 @@ export async function applyStartupGeometry(
     }
   } else {
     await applyDefaultFirstRunFrame();
+  }
+  // Windowed mode only: verify the window actually landed on a visible monitor.
+  // Catches stale off-screen coordinates from a disconnected external display.
+  if (!frame || frame.mode === "windowed") {
+    await ensureWindowOnScreen();
   }
 }
 

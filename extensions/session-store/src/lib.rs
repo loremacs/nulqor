@@ -377,6 +377,14 @@ fn on_message_added(
     let now = Utc::now();
     upsert_catalog_entry(paths, session_id, &title, &summary, now, now)?;
 
+    // Auto-title: set the session title from the first user message if
+    // it still has a default title ("New chat", "New session", or UUID-derived).
+    if role == "user" {
+        if let Some(content) = msg["content"].as_str() {
+            maybe_auto_title(paths, session_id, content);
+        }
+    }
+
     Ok(())
 }
 
@@ -392,6 +400,39 @@ fn message_preview(msg: &serde_json::Value) -> String {
 
 fn catalog_title(session_id: &str) -> String {
     session_id.replace('-', " ")
+}
+
+fn is_default_title(title: &str, session_id: &str) -> bool {
+    title == "New chat"
+        || title == "New session"
+        || title == catalog_title(session_id)
+}
+
+/// Derive a concise title from the first line of a user message.
+/// Truncates at the last word boundary before 60 chars.
+fn auto_title_from_content(content: &str) -> String {
+    let first_line = content.lines().next().unwrap_or(content);
+    let flat: String = first_line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.len() <= 60 {
+        flat
+    } else {
+        let cut = flat[..60].rfind(' ').unwrap_or(58);
+        format!("{}…", &flat[..cut])
+    }
+}
+
+/// Set the session title from message content if the title is still a default.
+fn maybe_auto_title(paths: &StorePaths, session_id: &str, content: &str) {
+    let Ok(mut catalog) = read_json::<Catalog>(&paths.catalog) else { return };
+    let Some(entry) = catalog.sessions.iter_mut().find(|e| e.id == session_id) else {
+        return;
+    };
+    if !is_default_title(&entry.title, session_id) {
+        return;
+    }
+    entry.title = auto_title_from_content(content);
+    entry.updated = Utc::now();
+    let _ = write_json(&paths.catalog, &catalog);
 }
 
 fn upsert_catalog_entry(
@@ -1275,6 +1316,58 @@ mod tests {
         ensure_session_materialized(&paths, id).unwrap();
         assert!(paths.session_file(id).exists());
         assert!(paths.rail_file(id).exists());
+    }
+
+    #[test]
+    fn auto_title_short_content() {
+        assert_eq!(auto_title_from_content("Hello world"), "Hello world");
+    }
+
+    #[test]
+    fn auto_title_long_content_truncates_at_word_boundary() {
+        // 12 words × 6 chars each = 72 chars — exceeds 60 limit.
+        let long = "abcde ".repeat(12).trim().to_string();
+        let result = auto_title_from_content(&long);
+        assert!(result.ends_with('…'), "expected ellipsis: {result:?}");
+        // Truncation must land on a word boundary, so just before '…' is not mid-word.
+        let stem = result.trim_end_matches('…');
+        assert!(!stem.ends_with(' '), "trailing space before ellipsis: {result:?}");
+        // Result fits: stem is at most 60 chars (space position) + ellipsis.
+        assert!(stem.len() <= 60, "stem too long: {} chars", stem.len());
+    }
+
+    #[test]
+    fn auto_title_first_line_only() {
+        let multi = "First line\nSecond line\nThird line";
+        assert_eq!(auto_title_from_content(multi), "First line");
+    }
+
+    #[test]
+    fn is_default_title_recognises_sentinels() {
+        assert!(is_default_title("New chat", "anything"));
+        assert!(is_default_title("New session", "anything"));
+        assert!(is_default_title("3a28bc04 be02 4312 a4c3 d88c3cf2a96d", "3a28bc04-be02-4312-a4c3-d88c3cf2a96d"));
+        assert!(!is_default_title("My project chat", "anything"));
+    }
+
+    #[test]
+    fn maybe_auto_title_sets_title_when_default() {
+        let paths = temp_store();
+        let id = "auto-title-test";
+        upsert_catalog_entry(&paths, id, "New chat", "", Utc::now(), Utc::now()).unwrap();
+        maybe_auto_title(&paths, id, "What is the capital of France?");
+        let catalog: Catalog = read_json(&paths.catalog).unwrap();
+        assert_eq!(catalog.sessions[0].title, "What is the capital of France?");
+    }
+
+    #[test]
+    fn maybe_auto_title_does_not_override_manual_title() {
+        let paths = temp_store();
+        let id = "manual-title-test";
+        upsert_catalog_entry(&paths, id, "My custom title", "", Utc::now(), Utc::now()).unwrap();
+        maybe_auto_title(&paths, id, "Some message content");
+        let catalog: Catalog = read_json(&paths.catalog).unwrap();
+        assert_eq!(catalog.sessions[0].title, "My custom title");
     }
 
     #[test]

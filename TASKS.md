@@ -71,11 +71,11 @@ Active task queue. Read before starting non-trivial work. Full phase specs in `d
 
 | # | Task | Status | Notes |
 |---|---|---|---|
-| 4.1 | Persistence extension — SQLite + FTS5 | ⬜ Pending | Index over `.nulqor/` files; see decision 009 |
+| 4.1 | Persistence extension — SQLite + FTS5 | ✅ Done | `extensions/persistence/`; `storage/main` capability; FTS5 index over `.nulqor/sessions/*.jsonl`; 6 tests |
 | 4.2 | Project save/load — `.nulqor` files | 🟡 Partial | v1: `sessions/*.jsonl` + `human/**`; room mode, search, CLI parity in BACKLOG |
-| 4.3 | Agent-loop extension — plan→act→observe→verify | ⬜ Pending | |
-| 4.4 | Context manager — token budget + compaction | ⬜ Pending | |
-| 4.5 | Decision records workflow — `docs/decisions/<NNN>.md` command | ⬜ Pending | |
+| 4.3 | Agent-loop extension — plan→act→observe→verify | ✅ Done | `extensions/agent-loop/`; `agent-loop:run@1` + `agent-loop:status@1`; CondVar sync bridge; 5 tests |
+| 4.4 | Context manager — token budget + compaction | ✅ Done | `extensions/context-manager/`; `context:usage@1`, `context:set-budget@1`, `context:compact@1`; UI token bar + compact button; 6 tests |
+| 4.5 | Decision records workflow — `docs/decisions/<NNN>.md` command | ✅ Done | `extensions/decision-records/`; `decisions:create@1` + `decisions:list@1`; 5 tests |
 
 ---
 
@@ -86,6 +86,16 @@ Active task queue. Read before starting non-trivial work. Full phase specs in `d
 ---
 
 ## Recently completed
+
+- 2026-06-19: **Stream-id race fix** — `generate_sync()` in agent-loop and `generate_summary_sync()` in context-manager now filter `provider:stream-done@1` by stream_id via `Arc<Mutex<Option<String>>>` expected_sid gate. Subscribe before invoke, set sid after invoke returns. Both callers safe under concurrent UI traffic.
+- 2026-06-19: **Real-time chat streaming** — `lib.rs` forwards `provider:stream-delta@1` + `provider:stream-done@1` from the Rust bus to the Tauri frontend via `app.emit()`. `panel.ts` replaces 400ms polling with `listen("nulqor:stream-*")` event subscriptions. Pending bubble streams content live; listeners self-clean on done/timeout. `sleep()` helper removed.
+- 2026-06-19: **Session auto-title** — `session-store` detects first user message and sets session title from message content (up to 60 chars, word-boundary truncation) when title is still a default sentinel ("New chat" / "New session" / UUID-derived). 6 new tests; 124 total.
+- 2026-06-19: **Persistence startup reindex** — `PersistenceExtension::activate()` calls `startup_reindex()` when `message_count == 0`; walks `.nulqor/sessions/*.jsonl` and populates the FTS index. Existing sessions are searchable immediately without manual `storage:reindex@1`.
+
+- 2026-06-19: **Phase 4.1 Persistence** — `extensions/persistence/`; SQLite+FTS5 indexer over `.nulqor/sessions/*.jsonl`; registers `storage/main` capability proving named-instance architecture; 6 tests.
+- 2026-06-19: **Phase 4.3 Agent-loop** — `extensions/agent-loop/`; plan→act→observe→verify with iteration cap; CondVar sync bridge from provider stream events; single-flight guard; 5 tests.
+- 2026-06-19: **Phase 4.4 Context manager** — `extensions/context-manager/`; approximate token counting, budget threshold, `context:compact@1` summarises old messages via provider + hydrates transcript; chat panel token bar + compact button wired; 6 tests.
+- 2026-06-19: **Phase 4.5 Decision records** — `extensions/decision-records/`; `decisions:create@1` auto-numbers from existing files, `decisions:list@1` reads + parses all ADRs. 5 tests pass. `cargo check` clean.
 
 - 2026-05-24: **Sessions v1** — `session-store` (file persistence, human rail, fork-on-edit) + `chat-panel` (rail, session picker, fork overlay). Handoff: [`docs/decisions/009-sessions-file-store.draft.md`](docs/decisions/009-sessions-file-store.draft.md).
 - 2026-05-24: MCP stdio server (`tools/mcp-server/`) + `.cursor/mcp.json` — Builder agent can now join conversations.

@@ -1,0 +1,24 @@
+[extension]
+id             = "agent-loop"
+version        = "0.1.0"
+kind           = "Service"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+requires       = ["transcript", "validation", "skill-runner"]
+
+[[commands]]
+id            = "agent-loop:run@1"
+owner         = "agent-loop"
+input-schema  = '{ "task": "string", "skill"?: "string", "checks"?: "array", "max_iterations"?: "integer" }'
+output-schema = '{ "success": "boolean", "iterations": "integer", "final_output": "string", "log": "array" }'
+callable-by   = ["panel", "agent", "service"]
+permission    = "write"
+
+[[commands]]
+id            = "agent-loop:status@1"
+owner         = "agent-loop"
+input-schema  = "{}"
+output-schema = '{ "running": "boolean", "current_iteration": "integer" }'
+callable-by   = ["panel", "agent", "service"]
+permission    = "read"

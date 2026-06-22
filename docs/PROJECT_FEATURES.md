@@ -354,3 +354,87 @@ When a sync handler needs async I/O (e.g., HTTP fetch in `provider-lmstudio`, `m
 ### Workspace root resolution
 
 `resolve_workspace_root()` (in `context-editor`, `run-logger`): if CWD is `src-tauri/` (dev mode), returns parent. Checks for `extensions/` or `AGENTS.md` as sentinel.
+
+---
+
+## Phase 4 — Persistence & harness essentials
+
+### 4.5 Decision records workflow
+
+**Extension:** `extensions/decision-records/`  
+**Commands:** `decisions:create@1`, `decisions:list@1`  
+**fs-scopes:** `docs/decisions/`  
+**Tests:** 5
+
+Captures architectural decisions as `docs/decisions/<NNN>-<slug>.md`. Auto-numbers by scanning existing files (max+1). Parses title and status from existing files for `decisions:list@1`.
+
+**`decisions:create@1` input:**
+```json
+{ "title": "string", "context": "string", "decision": "string",
+  "status"?: "string (default: Accepted)",
+  "supersedes"?: "string",
+  "consequences"?: "string" }
+```
+**Output:** `{ "path": "docs/decisions/NNN-slug.md", "number": NNN }`
+
+**File template:**
+```markdown
+# NNN — Title
+
+**Status:** Accepted
+**Date:** YYYY-MM-DD
+
+## Context
+...
+
+## Decision
+...
+
+## Consequences
+...
+```
+
+**`decisions:list@1`** reads the directory and parses each `NNN-*.md` for its title and `**Status:**` line. Returns `{ "decisions": [...] }` sorted by number.
+
+---
+
+### 4.3 Agent-loop extension
+
+**Extension:** `extensions/agent-loop/`  
+**Commands:** `agent-loop:run@1`, `agent-loop:status@1`  
+**Requires:** transcript, validation, skill-runner  
+**Tests:** 5
+
+Plan → act → observe → verify → report loop with enforced iteration cap.
+
+**`agent-loop:run@1` input:**
+```json
+{ "task": "string", "skill"?: "string", "checks"?: "array",
+  "max_iterations"?: "integer (default 5)" }
+```
+**Output:** `{ "success": boolean, "iterations": N, "final_output": "...", "log": [...] }`
+
+**Sync-bridge pattern:** provider:generate returns a stream_id immediately; agent-loop subscribes to `provider:stream-done@1` before calling generate, then blocks on a `(Mutex<Option<String>>, Condvar)` until the event fires. CondVar unsubscribed after completion.
+
+**Single-flight guard:** `AtomicBool.swap(true)` on entry rejects concurrent invocations.
+
+**Correction loop:** on check failure, the model's previous output and a "revise your answer" message are appended to the message history for the next iteration.
+
+---
+
+### 4.4 Context manager extension
+
+**Extension:** `extensions/context-manager/`  
+**Commands:** `context:usage@1`, `context:set-budget@1`, `context:compact@1`  
+**Requires:** transcript  
+**Tests:** 6
+
+Tracks approximate token usage (chars ÷ 4) and compacts old messages into a summary when near budget.
+
+**Token counting:** subscribes to `transcript:message-added@1` (incremental) and `transcript:hydrated@1` (full recount). Both events update an `AtomicU64` counter without locking.
+
+**`context:usage@1`** returns `{ messages_count, approx_tokens, budget, near_limit, pct_used }`. Default budget: 8 192 tokens. Warning threshold: 85%.
+
+**`context:compact@1`** — summarises the oldest (N - keep_recent) messages via provider:generate (same CondVar sync-bridge as agent-loop), then calls `transcript:hydrate@1` with [summary_message + recent_messages]. The summary message is tagged with `driver: "context-manager"`.
+
+**Chat panel UI:** `#token-budget` span shows live usage (updated in `refreshAll`). `#compact-context-btn` appears when `near_limit` is true; clicking it calls `context:compact@1` and re-renders the transcript.

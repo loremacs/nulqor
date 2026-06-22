@@ -22,6 +22,9 @@ enabled_extensions = [
   "registry",
   "workbench",
   "run-logger",
+  "decision-records",
+  "context-manager",
+  "persistence",
 ]
 
 [shell]

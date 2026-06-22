@@ -1,0 +1,42 @@
+[extension]
+id             = "context-manager"
+version        = "0.1.0"
+kind           = "Service"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+requires       = ["transcript"]
+
+[[subscribes]]
+namespace = "transcript"
+name      = "message-added"
+version   = "1"
+
+[[subscribes]]
+namespace = "transcript"
+name      = "hydrated"
+version   = "1"
+
+[[commands]]
+id            = "context:usage@1"
+owner         = "context-manager"
+input-schema  = "{}"
+output-schema = '{ "messages_count": "integer", "approx_tokens": "integer", "budget": "integer", "near_limit": "boolean", "pct_used": "number" }'
+callable-by   = ["panel", "agent", "service"]
+permission    = "read"
+
+[[commands]]
+id            = "context:set-budget@1"
+owner         = "context-manager"
+input-schema  = '{ "budget": "integer" }'
+output-schema = '{ "budget": "integer" }'
+callable-by   = ["panel", "agent", "service"]
+permission    = "write"
+
+[[commands]]
+id            = "context:compact@1"
+owner         = "context-manager"
+input-schema  = '{ "keep_recent"?: "integer" }'
+output-schema = '{ "compacted": "boolean", "before_tokens": "integer", "after_tokens": "integer", "summary_length": "integer" }'
+callable-by   = ["panel", "agent", "service"]
+permission    = "write"

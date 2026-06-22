@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import "./style.css";
 
 // ---------------------------------------------------------------------------
@@ -113,6 +114,7 @@ let editingSessionId: string | null = null;
 let pendingDeleteSessionId: string | null = null;
 let pinTranscriptScroll = true;
 let awaitingAssistant = false;
+let streamingContent = "";
 const openReasoningIds = new Set<string>();
 let mountGeneration = 0;
 const SCROLL_PIN_THRESHOLD = 64;
@@ -197,10 +199,6 @@ const ICON_SPACE_INVADER = buildPixelIcon(
   "icon-space-invader",
 );
 const ICON_TRASH = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M5.5 2 6 1h4l.5 1H14v1H2V2h3.5zM3 4h10l-.9 10H3.9L3 4zm2 2v6h1V6H5zm3 0v6h1V6H8z"/></svg>`;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function isTranscriptAtBottom(list: HTMLElement): boolean {
   return (
@@ -444,6 +442,32 @@ async function loadTranscript(forceScroll = false): Promise<void> {
 
 let refreshInFlight = false;
 
+async function refreshTokenBudget(): Promise<void> {
+  const budgetEl = document.querySelector<HTMLSpanElement>("#token-budget");
+  const compactBtn = document.querySelector<HTMLButtonElement>("#compact-context-btn");
+  try {
+    const usage = await coreInvoke<{
+      messages_count: number;
+      approx_tokens: number;
+      budget: number;
+      near_limit: boolean;
+      pct_used: number;
+    }>("context:usage@1");
+    const pct = Math.round(usage.pct_used * 100);
+    if (budgetEl) {
+      budgetEl.textContent = `ctx: ~${usage.approx_tokens}t / ${usage.budget}t (${pct}%)`;
+      budgetEl.classList.toggle("token-budget-warn", usage.near_limit);
+    }
+    if (compactBtn) compactBtn.hidden = !usage.near_limit;
+  } catch {
+    // context-manager not loaded — show harness token cost from context profile instead
+    if (budgetEl && contextProfile) {
+      budgetEl.textContent = `harness: ~${contextProfile.token_estimate} tok`;
+    }
+    if (compactBtn) compactBtn.hidden = true;
+  }
+}
+
 async function refreshAll(forceTranscriptScroll = false): Promise<void> {
   if (refreshInFlight) return;
   refreshInFlight = true;
@@ -452,6 +476,7 @@ async function refreshAll(forceTranscriptScroll = false): Promise<void> {
       loadTranscript(forceTranscriptScroll),
       loadRail(),
       loadSessions(),
+      refreshTokenBudget(),
     ]);
   } finally {
     // Always clear the flag so a stale in-flight from a previous mount does not
@@ -765,8 +790,10 @@ function renderTranscript(forceScroll = false): void {
   if (awaitingAssistant) {
     const pending = document.createElement("div");
     pending.className = "message message-assistant message-pending";
+    const bodyText = streamingContent || "…";
+    const dotClass = streamingContent ? "" : " pending-dots";
     pending.innerHTML =
-      '<div class="msg-header"><span class="participant">Model</span> <span class="muted">thinking…</span></div><div class="msg-content pending-dots">…</div>';
+      `<div class="msg-header"><span class="participant">Model</span> <span class="muted">${streamingContent ? "writing…" : "thinking…"}</span></div><div class="msg-content${dotClass}">${escapeHtml(bodyText)}</div>`;
     list.appendChild(pending);
   }
   restoreOpenReasoning();
@@ -776,6 +803,22 @@ function renderTranscript(forceScroll = false): void {
         forceScroll || awaitingAssistant ? "auto" : "smooth",
       ),
     );
+  }
+}
+
+function updateStreamingBubble(): void {
+  const list = el<HTMLDivElement>("#transcript");
+  const pending = list.querySelector<HTMLDivElement>(".message-pending");
+  if (!pending) return;
+  const header = pending.querySelector<HTMLElement>(".msg-header");
+  const contentEl = pending.querySelector<HTMLDivElement>(".msg-content");
+  if (header) {
+    header.innerHTML = `<span class="participant">Model</span> <span class="muted">writing…</span>`;
+  }
+  if (contentEl) {
+    contentEl.classList.remove("pending-dots");
+    contentEl.textContent = streamingContent;
+    if (pinTranscriptScroll) scrollTranscriptToBottom("auto");
   }
 }
 
@@ -1540,40 +1583,83 @@ async function updateTokenBudget(): Promise<void> {
   await loadContextProfile();
 }
 
+async function compactContext(): Promise<void> {
+  const statusEl = document.querySelector<HTMLSpanElement>("#connection-status");
+  if (statusEl) statusEl.textContent = "compacting…";
+  try {
+    const result = await coreInvoke<{
+      compacted: boolean;
+      before_tokens: number;
+      after_tokens: number;
+      summary_length: number;
+    }>("context:compact@1", {});
+    if (result.compacted) {
+      if (statusEl) {
+        statusEl.textContent =
+          `compacted: ${result.before_tokens}→${result.after_tokens}t`;
+      }
+      await refreshAll(true);
+    } else {
+      if (statusEl) statusEl.textContent = "context: nothing to compact";
+    }
+  } catch (e) {
+    console.error("context:compact@1 failed", e);
+    if (statusEl) statusEl.textContent = "compact failed";
+  }
+}
+
 async function waitForAssistantReply(
-  beforeCount: number,
+  streamId: string,
   timeoutMs = 120_000,
 ): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
   pinTranscriptScroll = true;
   awaitingAssistant = true;
+  streamingContent = "";
   renderTranscript();
 
-  let timedOut = true;
-  while (Date.now() < deadline) {
-    await sleep(400);
-    // Keep the transcript hash so loadTranscript only re-renders when the
-    // server transcript actually changes (e.g. the assistant turn lands).
-    await loadTranscript();
-    if (
-      messages.length > beforeCount &&
-      messages[messages.length - 1]?.role === "assistant"
-    ) {
-      timedOut = false;
-      break;
-    }
-  }
+  return new Promise<void>((resolve) => {
+    let unlistenDelta: UnlistenFn | null = null;
+    let unlistenDone: UnlistenFn | null = null;
+    let settled = false;
 
-  if (timedOut) {
-    const statusEl = el<HTMLSpanElement>("#connection-status");
-    statusEl.textContent = "response timed out";
-    statusEl.className = "status-error";
-  }
+    const finish = async (timedOut: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (unlistenDelta) { unlistenDelta(); unlistenDelta = null; }
+      if (unlistenDone) { unlistenDone(); unlistenDone = null; }
+      if (timedOut) {
+        const statusEl = el<HTMLSpanElement>("#connection-status");
+        statusEl.textContent = "response timed out";
+        statusEl.className = "status-error";
+      }
+      awaitingAssistant = false;
+      streamingContent = "";
+      transcriptHash = "";
+      await loadTranscript();
+      scrollTranscriptToBottom("smooth");
+      resolve();
+    };
 
-  awaitingAssistant = false;
-  transcriptHash = "";
-  await loadTranscript();
-  scrollTranscriptToBottom("smooth");
+    const timer = window.setTimeout(() => void finish(true), timeoutMs);
+
+    void listen<{ stream_id: string; delta: string }>(
+      "nulqor:stream-delta",
+      (event) => {
+        if (event.payload.stream_id !== streamId) return;
+        streamingContent += event.payload.delta ?? "";
+        updateStreamingBubble();
+      },
+    ).then((fn) => { if (!settled) unlistenDelta = fn; else fn(); });
+
+    void listen<{ stream_id: string }>(
+      "nulqor:stream-done",
+      (event) => {
+        if (event.payload.stream_id !== streamId) return;
+        void finish(false);
+      },
+    ).then((fn) => { if (!settled) unlistenDone = fn; else fn(); });
+  });
 }
 
 async function sendMessage(): Promise<void> {
@@ -1611,7 +1697,6 @@ async function sendMessage(): Promise<void> {
       return;
     }
 
-    const beforeCount = messages.length;
     await coreInvoke("transcript:add-user-message@1", {
       content: text,
       observer_name: "human",
@@ -1620,11 +1705,11 @@ async function sendMessage(): Promise<void> {
     await loadTranscript();
     scrollTranscriptToBottom("smooth");
 
-    await coreInvoke("provider:generate@1", {
+    const genResult = await coreInvoke<{ stream_id: string }>("provider:generate@1", {
       messages,
       model,
     });
-    await waitForAssistantReply(beforeCount);
+    await waitForAssistantReply(genResult.stream_id ?? "");
     await syncConnectionFromProvider(false);
     await loadRail();
   } catch (e) {
@@ -1666,13 +1751,12 @@ async function editUserMessage(messageId: string): Promise<void> {
         const transcript = await coreInvoke<{ messages: Message[] }>(
           "transcript:get@1",
         );
-        const beforeCount = transcript.messages.length;
         const model = el<HTMLSelectElement>("#model-select").value || undefined;
-        await coreInvoke("provider:generate@1", {
+        const editGenResult = await coreInvoke<{ stream_id: string }>("provider:generate@1", {
           messages: transcript.messages,
           model,
         });
-        await waitForAssistantReply(beforeCount);
+        await waitForAssistantReply(editGenResult.stream_id ?? "");
         transcriptHash = "";
         await refreshAll();
       }
@@ -1856,6 +1940,11 @@ function wirePanelEvents(): void {
 
   el("#session-new").addEventListener("click", () => void createSession());
 
+  const compactBtn = document.querySelector<HTMLButtonElement>("#compact-context-btn");
+  if (compactBtn) {
+    compactBtn.addEventListener("click", () => void compactContext());
+  }
+
   el("#toggle-map-btn").addEventListener("click", () => toggleMapVisibility());
 
   el("#fetch-models-btn").addEventListener("click", () =>
@@ -2013,6 +2102,7 @@ function buildShell(container: HTMLElement): void {
           </div>
           <div class="connection-bar-right">
             <span id="token-budget" class="muted"></span>
+            <button type="button" id="compact-context-btn" class="btn-ghost btn-compact-context" hidden title="Context nearing limit — click to compact old messages">Compact ctx</button>
             <button type="button" id="toggle-sessions-btn" class="btn-ghost topbar-toggle" aria-pressed="true" title="Hide sessions panel">Hide chats</button>
             <button type="button" id="toggle-map-btn" class="btn-ghost topbar-toggle" aria-pressed="true" title="Hide conversation map">Hide map</button>
           </div>
@@ -2185,6 +2275,7 @@ export function mount(container: HTMLElement): void {
   editingSessionId = null;
   pendingDeleteSessionId = null;
   awaitingAssistant = false;
+  streamingContent = "";
   refreshInFlight = false;
   openReasoningIds.clear();
 

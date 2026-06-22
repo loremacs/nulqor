@@ -1,0 +1,51 @@
+[extension]
+id             = "persistence"
+version        = "0.1.0"
+kind           = "Service"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+requires       = ["transcript", "session-store"]
+fs-scopes      = [".nulqor/"]
+
+[[provides]]
+capability = "storage"
+instance   = "main"
+contract   = "storage@1"
+
+[[subscribes]]
+namespace = "transcript"
+name      = "message-added"
+version   = "1"
+
+[[commands]]
+id            = "storage:search@1"
+owner         = "persistence"
+input-schema  = '{ "query": "string", "limit"?: "integer" }'
+output-schema = '{ "results": "array", "total": "integer" }'
+callable-by   = ["panel", "agent", "service"]
+permission    = "read"
+
+[[commands]]
+id            = "storage:index-session@1"
+owner         = "persistence"
+input-schema  = '{ "session_id": "string" }'
+output-schema = '{ "indexed": "integer", "session_id": "string" }'
+callable-by   = ["panel", "agent", "service"]
+permission    = "write"
+
+[[commands]]
+id            = "storage:reindex@1"
+owner         = "persistence"
+input-schema  = "{}"
+output-schema = '{ "sessions": "integer", "messages": "integer" }'
+callable-by   = ["panel", "agent", "service"]
+permission    = "write"
+
+[[commands]]
+id            = "storage:status@1"
+owner         = "persistence"
+input-schema  = "{}"
+output-schema = '{ "db_path": "string", "message_count": "integer", "session_count": "integer", "ok": "boolean" }'
+callable-by   = ["panel", "agent", "service"]
+permission    = "read"

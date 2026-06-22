@@ -28,9 +28,10 @@ export function isDefaultMenuDragBlocked(target: HTMLElement): boolean {
 function trackTitleBarDrag(
   pointerDown: PointerEvent,
   windowMode: WindowMode,
-  onDock: (event: PointerEvent) => void,
+  onDock: ((event: PointerEvent) => void) | undefined,
   onDragMove?: (event: PointerEvent) => void,
   onDragEnd?: () => void,
+  onNativeDragStart?: () => void,
 ): void {
   const originX = pointerDown.clientX;
   const originY = pointerDown.clientY;
@@ -52,6 +53,7 @@ function trackTitleBarDrag(
         cleanup();
         onDragEnd?.();
         void getCurrentWindow().startDragging();
+        onNativeDragStart?.();
         return;
       }
     }
@@ -63,7 +65,7 @@ function trackTitleBarDrag(
 
   const onUp = (event: PointerEvent): void => {
     if (dragging && windowMode === "fullscreen") {
-      onDock(event);
+      onDock?.(event);
     }
     onDragEnd?.();
     cleanup();
@@ -97,6 +99,9 @@ export function mountSharedChrome(
   let windowMode = ctx.initialMode;
   let togglingFullscreen = false;
   let framePersistTimer: ReturnType<typeof setTimeout> | null = null;
+  // macOS: startDragging() causes the app to lose activation; track so we can restore it.
+  let pendingNativeDragRefocus = false;
+  let nativeDragRefocusReset: ReturnType<typeof setTimeout> | null = null;
 
   const scheduleWindowFramePersist = (): void => {
     if (framePersistTimer) clearTimeout(framePersistTimer);
@@ -170,12 +175,23 @@ export function mountSharedChrome(
     const target = event.target as HTMLElement;
     if (isMenuDragBlockedFn(target)) return;
 
+    const onNativeDragStart = platform === "macos" ? (): void => {
+      pendingNativeDragRefocus = true;
+      // Safety reset: clear the flag if focus is never lost (e.g. drag cancelled).
+      if (nativeDragRefocusReset !== null) clearTimeout(nativeDragRefocusReset);
+      nativeDragRefocusReset = setTimeout(() => {
+        nativeDragRefocusReset = null;
+        pendingNativeDragRefocus = false;
+      }, 5000);
+    } : undefined;
+
     trackTitleBarDrag(
       event,
       windowMode,
       onMenuDockDrag,
       onMenuDockDragMove,
       onMenuDockDragEnd,
+      onNativeDragStart,
     );
   });
 
@@ -200,6 +216,22 @@ export function mountSharedChrome(
     .catch((err) => {
       console.warn("[window-chrome] onCloseRequested unavailable:", err);
     });
+
+  // macOS: restore app activation after a native window drag (startDragging) deactivates us.
+  if (platform === "macos") {
+    void getCurrentWindow()
+      .onFocusChanged(({ payload: focused }) => {
+        if (!focused && pendingNativeDragRefocus) {
+          pendingNativeDragRefocus = false;
+          if (nativeDragRefocusReset !== null) {
+            clearTimeout(nativeDragRefocusReset);
+            nativeDragRefocusReset = null;
+          }
+          setTimeout(() => void getCurrentWindow().setFocus(), 50);
+        }
+      })
+      .catch(() => {});
+  }
 
   window.addEventListener("pagehide", () => {
     if (framePersistTimer) {

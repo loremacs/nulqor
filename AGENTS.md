@@ -131,3 +131,29 @@ Each main content area has an `index.md` that lists what lives there. **Read the
 | Chat UI, sessions, persistence, group chat, human rail, forks | [`docs/decisions/009-sessions-file-store.draft.md`](docs/decisions/009-sessions-file-store.draft.md) → [`docs/PROJECT_FEATURES.md`](docs/PROJECT_FEATURES.md) §2.4–2.4b → [`BACKLOG.md`](BACKLOG.md) § Chat |
 | Host canvas, grid/split layout, click-through | [`skills/canvas-layout/SKILL.md`](skills/canvas-layout/SKILL.md) |
 | HTTP/MCP with a running app | [`skills/nulqor-communicate/SKILL.md`](skills/nulqor-communicate/SKILL.md) |
+
+---
+
+## Multi-platform targeting
+
+Nulqor targets **macOS, Windows, and Linux**. The codebase must remain cross-platform at all times.
+
+**When developing on a specific OS, focus testing on that OS** — platform-specific bugs should be reproduced and fixed against the current platform before shipping.
+
+### Platform guards
+
+| Layer | How to branch |
+|---|---|
+| Rust | `#[cfg(target_os = "macos")]`, `#[cfg(target_os = "windows")]` |
+| TypeScript | `isMacOS()` from `extensions/host/ui/platform.ts` |
+| CSS | `.platform-macos` class on `<html>` (set at init in `shell.ts`) |
+
+Never add a Windows-only or macOS-only workaround as the default path — always use a platform guard and handle the fallback.
+
+### macOS-specific notes (primary dev OS as of June 2026)
+
+- **Native menu bar** (`src-tauri/src/native_menu.rs`): JS dropdowns are hidden on macOS (`display:none` via `.platform-macos .menu-bar-menus`); state changes must sync via `update_menu_check` IPC.
+- **Window chrome** (`extensions/host/ui/window-chrome/macos.ts`): Traffic-light buttons, leading order. See `chrome-mount.ts` for shared logic.
+- **`startDragging()` deactivates the app**: On macOS, native window drag hands app activation to the system. `chrome-mount.ts` listens for `onFocusChanged` after `startDragging()` and calls `setFocus()` to restore activation. Without this, the menu bar shows Finder and subsequent panel clicks require a "click-to-activate" first (macOS first-click activates the window without delivering `pointerdown` to the webview).
+- **Panel drag / WKWebView pointer events**: Always call `target.setPointerCapture(event.pointerId)` before starting a drag session. Without it, WKWebView may stop delivering `pointermove`/`pointerup` when the cursor passes over `pointer-events:none` areas.
+- **Click-through**: `setIgnoreCursorEvents` is async IPC. The 16 ms poll keeps it current; `suspend()`/`resume()` brackets any drag or edit operation.

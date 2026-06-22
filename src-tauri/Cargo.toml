@@ -31,3 +31,6 @@ tower-http = { version = "0.5", features = ["cors"] }
 serde_yaml = "0.9"
 notify = "6"
 regex = "1"
+
+# Phase 4 deps
+rusqlite = { version = "0.32", features = ["bundled"] }

@@ -45,7 +45,8 @@ use events::EventBus;
 use extensions::{
     chat_panel, clock_panel, context_editor, hello_panel, hello_world, host,
     http_api, mcp_bridge, provider_llamacpp, provider_lmstudio, provider_ollama, provider_router,
-    registry, run_logger, session_store, skill_runner, transcript, validation, workbench,
+    agent_loop, context_manager, decision_records, persistence, registry, run_logger, session_store,
+    skill_runner, transcript, validation, workbench,
 };
 use permission::PermissionGate;
 use runtime::Runtime;
@@ -133,6 +134,18 @@ fn load_extensions(
     loader.register("run-logger", |m| Arc::new(run_logger::RunLoggerExtension::new(m)));
     loader.register("registry", |m| Arc::new(registry::RegistryExtension::new(m)));
     loader.register("workbench", |m| Arc::new(workbench::WorkbenchExtension::new(m)));
+    loader.register("decision-records", |m| {
+        Arc::new(decision_records::DecisionRecordsExtension::new(m))
+    });
+    loader.register("agent-loop", |m| {
+        Arc::new(agent_loop::AgentLoopExtension::new(m))
+    });
+    loader.register("context-manager", |m| {
+        Arc::new(context_manager::ContextManagerExtension::new(m))
+    });
+    loader.register("persistence", |m| {
+        Arc::new(persistence::PersistenceExtension::new(m))
+    });
 
     match loader.scan_and_load(
         extensions_dir,
@@ -205,6 +218,26 @@ pub fn run() {
             let startup = startup_config::load_startup_config(&root);
             let ctx = build_core(&extensions_dir);
             load_extensions(&extensions_dir, &ctx, &startup);
+
+            // Forward provider stream events from the internal Rust bus to the
+            // Tauri frontend so TypeScript can subscribe with listen().
+            {
+                use crate::types::{EventPattern, NamespacedEvent};
+                let handle = app.handle().clone();
+                ctx.bus.subscribe(
+                    EventPattern::exact("provider", "stream-delta", 1),
+                    Arc::new(move |ev: &NamespacedEvent| {
+                        let _ = handle.emit("nulqor:stream-delta", &ev.payload);
+                    }),
+                );
+                let handle = app.handle().clone();
+                ctx.bus.subscribe(
+                    EventPattern::exact("provider", "stream-done", 1),
+                    Arc::new(move |ev: &NamespacedEvent| {
+                        let _ = handle.emit("nulqor:stream-done", &ev.payload);
+                    }),
+                );
+            }
 
             // macOS: build the native menu bar and forward activations to JS.
             #[cfg(target_os = "macos")]

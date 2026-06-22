@@ -1,0 +1,25 @@
+[extension]
+id             = "decision-records"
+version        = "0.1.0"
+kind           = "Service"
+api-version    = "v1"
+schema-version = "1.0.0"
+min-core       = "0.1.0"
+requires       = []
+fs-scopes      = ["docs/decisions/"]
+
+[[commands]]
+id            = "decisions:create@1"
+owner         = "decision-records"
+input-schema  = '{ "title": "string", "context": "string", "decision": "string" }'
+output-schema = '{ "path": "string", "number": "integer" }'
+callable-by   = ["panel", "agent", "service"]
+permission    = "write"
+
+[[commands]]
+id            = "decisions:list@1"
+owner         = "decision-records"
+input-schema  = "{}"
+output-schema = '{ "decisions": "array" }'
+callable-by   = ["panel", "agent", "service"]
+permission    = "read"

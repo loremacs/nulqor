@@ -349,9 +349,14 @@ function applyTileToElement(
 function trackPointerSession(
   onMove: (event: PointerEvent) => void,
   onEnd: (event: PointerEvent) => void,
+  pointerId?: number,
 ): void {
-  const move = (event: PointerEvent): void => onMove(event);
+  const move = (event: PointerEvent): void => {
+    if (pointerId !== undefined && event.pointerId !== pointerId) return;
+    onMove(event);
+  };
   const end = (event: PointerEvent): void => {
+    if (pointerId !== undefined && event.pointerId !== pointerId) return;
     document.removeEventListener("pointermove", move);
     document.removeEventListener("pointerup", end);
     document.removeEventListener("pointercancel", end);
@@ -401,7 +406,7 @@ export async function initShell(): Promise<ShellHandle> {
     openPanelIds = dedupeOpenPanelIds([...canvasConfig.open_panels]);
   }
 
-  let menuDock: MenuDock = persisted?.menuDock ?? "top";
+  let menuDock: MenuDock = isMacOS() ? "top" : (persisted?.menuDock ?? "top");
   let windowMode: "fullscreen" | "windowed" =
     persisted?.windowFrame?.mode ?? "fullscreen";
   let windowFrame: WindowFrameState =
@@ -1534,18 +1539,21 @@ export async function initShell(): Promise<ShellHandle> {
       applyWindowModePolicy(mode, previous, true);
       persist();
     },
-    onMenuDockDrag: (endEvent) => {
-      menuDockPreview.hide();
-      setMenuDock(nearestMenuDock(endEvent.clientX, endEvent.clientY));
-      persist();
-      syncClickThrough();
-    },
-    onMenuDockDragMove: (moveEvent) => {
-      menuDockPreview.updateFromPointer(moveEvent.clientX, moveEvent.clientY);
-    },
-    onMenuDockDragEnd: () => {
-      menuDockPreview.hide();
-    },
+    // Side-docking is a Windows-only UX — macOS has a fixed top menu bar convention.
+    ...(!isMacOS() && {
+      onMenuDockDrag: (endEvent) => {
+        menuDockPreview.hide();
+        setMenuDock(nearestMenuDock(endEvent.clientX, endEvent.clientY));
+        persist();
+        syncClickThrough();
+      },
+      onMenuDockDragMove: (moveEvent) => {
+        menuDockPreview.updateFromPointer(moveEvent.clientX, moveEvent.clientY);
+      },
+      onMenuDockDragEnd: () => {
+        menuDockPreview.hide();
+      },
+    }),
     initialMode: windowMode,
   });
 
@@ -1563,8 +1571,10 @@ export async function initShell(): Promise<ShellHandle> {
       )
     )
       return;
+    const { pointerId } = event;
     const resume = clickThrough.suspend();
-    const end = (): void => {
+    const end = (e: PointerEvent): void => {
+      if (e.pointerId !== pointerId) return;
       document.removeEventListener("pointerup", end);
       document.removeEventListener("pointercancel", end);
       resume();
@@ -1726,6 +1736,9 @@ export async function initShell(): Promise<ShellHandle> {
       desktop.appendChild(tileEl);
       syncPanelStackOrder(id);
       event.preventDefault();
+      // Capture the pointer so WKWebView (macOS) reliably delivers pointermove/pointerup
+      // to the document listener even when the cursor passes over pointer-events:none areas.
+      target.setPointerCapture(event.pointerId);
       const resumeClickThrough = clickThrough.suspend();
       trackPointerSession(
         (moveEvent) => applyResize(moveEvent.clientX, moveEvent.clientY),
@@ -1735,6 +1748,7 @@ export async function initShell(): Promise<ShellHandle> {
           resumeClickThrough();
           syncClickThrough();
         },
+        event.pointerId,
       );
       return;
     }
@@ -1752,6 +1766,9 @@ export async function initShell(): Promise<ShellHandle> {
     };
     raiseGridPanel(tileEl, id);
     event.preventDefault();
+    // Capture the pointer so WKWebView (macOS) reliably delivers pointermove/pointerup
+    // to the document listener even when the cursor passes over pointer-events:none areas.
+    target.setPointerCapture(event.pointerId);
     const resumeClickThrough = clickThrough.suspend();
     trackPointerSession(
       (moveEvent) => {
@@ -1792,6 +1809,7 @@ export async function initShell(): Promise<ShellHandle> {
         resumeClickThrough();
         syncClickThrough();
       },
+      event.pointerId,
     );
   });
 

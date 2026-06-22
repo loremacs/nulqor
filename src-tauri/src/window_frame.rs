@@ -156,12 +156,27 @@ fn resolve_geometry(
         }
     }
 
-    let pos = if frame.x >= 0 && frame.y >= 0 {
-        Some((frame.x, frame.y))
-    } else {
-        None
-    };
-    Ok((pos, frame.width, frame.height))
+    // -1,-1 is the JS sentinel for "no saved position, center instead".
+    if frame.x == -1 && frame.y == -1 {
+        return Ok((None, frame.width, frame.height));
+    }
+
+    // If the position was saved on a named monitor that's no longer connected,
+    // the coordinates would be off-screen. Center instead.
+    if let Some(name) = frame.monitor_name.as_deref() {
+        if !name.is_empty() {
+            let available = window
+                .available_monitors()
+                .unwrap_or_default()
+                .into_iter()
+                .any(|m| m.name().map(|n| n == name).unwrap_or(false));
+            if !available {
+                return Ok((None, frame.width, frame.height));
+            }
+        }
+    }
+
+    Ok((Some((frame.x, frame.y)), frame.width, frame.height))
 }
 
 pub fn apply(window: &WebviewWindow, frame: &WindowFramePersist) -> Result<(), String> {

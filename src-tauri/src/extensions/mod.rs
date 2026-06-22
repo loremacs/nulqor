@@ -47,3 +47,15 @@ pub mod registry;
 #[path = "../../../extensions/workbench/src/lib.rs"]
 pub mod workbench;
 
+#[path = "../../../extensions/decision-records/src/lib.rs"]
+pub mod decision_records;
+
+#[path = "../../../extensions/agent-loop/src/lib.rs"]
+pub mod agent_loop;
+
+#[path = "../../../extensions/context-manager/src/lib.rs"]
+pub mod context_manager;
+
+#[path = "../../../extensions/persistence/src/lib.rs"]
+pub mod persistence;
+

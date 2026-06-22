@@ -28,8 +28,8 @@ export type WindowChromeContext = {
   /** Sync-write the in-memory frame (used on pagehide when async capture may not finish). */
   flushWindowFrame?: () => void;
   onLayoutChanged: () => void;
-  /** Fullscreen only: re-dock menu bar after title-bar drag. */
-  onMenuDockDrag: (event: PointerEvent) => void;
+  /** Fullscreen only: re-dock menu bar after title-bar drag. Omit to disable side-docking. */
+  onMenuDockDrag?: (event: PointerEvent) => void;
   /** Fullscreen only: pointer moved while docking drag is active. */
   onMenuDockDragMove?: (event: PointerEvent) => void;
   /** Fullscreen or windowed: drag gesture ended (hide snap preview). */
