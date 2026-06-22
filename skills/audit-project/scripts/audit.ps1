@@ -166,12 +166,19 @@ if (Test-Path $srcDir) {
 
 # ── 3. Per-extension scaffold ───────────────────────────────────────────────
 
+# Shared-code modules compiled into the core but NOT loadable extensions:
+# no manifest, no commands, no loader.register, no index row. They are still
+# bridged via #[path] in mod.rs so sibling extensions can `use` them.
+# provider-common holds the shared HTTP/OpenAI helpers for the provider-* backends.
+$SHARED_MODULES = @("provider-common")
+
 $extensionsDir = Join-Path $Root "extensions"
 $diskExtIds = [System.Collections.Generic.List[string]]::new()
 
 if (Test-Path $extensionsDir) {
     Get-ChildItem -Path $extensionsDir -Directory | ForEach-Object {
         if ($_.Name -eq "index.md") { return }
+        if ($SHARED_MODULES -contains $_.Name) { return }
         $extId = $_.Name
         $manifestPath = Join-Path $_.FullName "extension.toml"
         if (-not (Test-Path $manifestPath)) {
@@ -253,7 +260,7 @@ foreach ($entry in $modEntries) {
         Add-Fail "src-tauri/src/extensions/mod.rs: path for '$($entry.ExtId)' must end with $expectedSuffix"
     }
 
-    if ($diskExtIds -notcontains $entry.ExtId) {
+    if ($diskExtIds -notcontains $entry.ExtId -and $SHARED_MODULES -notcontains $entry.ExtId) {
         Add-Fail "src-tauri/src/extensions/mod.rs: bridge for '$($entry.ExtId)' but extensions/$($entry.ExtId)/ missing"
     }
 }

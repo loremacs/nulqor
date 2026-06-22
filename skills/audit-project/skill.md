@@ -6,7 +6,8 @@ description: Verify repo layout, extension colocation, registry sync, and run nu
 ## Metadata
 
 ```text
-version:       1.0.0
+skill_version: 1.0.0
+applies_to:    nulqor
 topics:        meta, audit, layout, extensions, lint
 platform:      all
 script_policy: required

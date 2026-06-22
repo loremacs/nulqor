@@ -52,7 +52,8 @@ FAIL blocks a phase gate. S1 FAIL = urgent (dangerous script pattern).
 ### MD — Metadata section
 
 - **MD1** `## Metadata` exists
-- **M8** `version:` valid semver
+- **M8** `skill_version:` present and valid semver (legacy `version:` = FAIL, rename required)
+- **MD2** `applies_to:` present and non-empty (e.g. `nulqor`, `tauri@2`)
 - **M9** `topics:` present and non-empty
 - **M10** `platform:` present and valid
 - **M11** OS prefix (`win-`, `mac-`, `linux-`) matches `platform`

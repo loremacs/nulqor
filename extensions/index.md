@@ -28,6 +28,10 @@ Each extension is self-contained under `extensions/<id>/`. Rust sources compile 
 | `skill-runner` | Service | Phase 3 | On-demand skill loading and injection with execution logging |
 | `validation` | Service | Phase 3 | Deterministic pass/fail checks on model output |
 | `run-logger` | Service | Phase 3 | Appends every turn to `runs/YYYY-MM-DD.jsonl` |
+| `persistence` | Service | Phase 4 | Slotted `storage`/`main`; SQLite+FTS5 index over `.nulqor/sessions/*.jsonl` |
+| `agent-loop` | Service | Phase 4 | plan→act→observe→verify→report loop with iteration cap (`agent-loop:run@1`) |
+| `context-manager` | Service | Phase 4 | Token-budget tracking and transcript compaction (`context:usage/compact@1`) |
+| `decision-records` | Service | Phase 4 | Writes auto-numbered ADRs to `docs/decisions/` (`decisions:create/list@1`) |
 
 ## Extension Scaffold (required structure for every extension)
 

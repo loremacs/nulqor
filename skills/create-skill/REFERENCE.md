@@ -93,17 +93,24 @@ description   required — what + when
 Optional *standard* fields only if the host runtime requires them:
 `license`, `compatibility`, `metadata`, `allowed-tools`.
 
-**Do not put version, topics, platform, script_policy, or scope in frontmatter.**
+**Do not put skill_version, applies_to, topics, platform, script_policy, or scope in frontmatter.**
 
 **## Metadata (first body section, after closing ---):**
 
 ```text
-version:       semver, start 1.0.0
+skill_version: semver, start 1.0.0 — our own revision of the skill
+applies_to:    software@version (e.g. tauri@2) or "nulqor" for internal — the thing it documents
+docs:          official doc URL matched to applies_to version (optional; omit if none)
 topics:        comma-separated discovery tags
 platform:      all | windows | macos | linux | combos
 script_policy: none | optional | required
 scope:         generic | os-scoped | tool-scoped | domain-scoped | project-scoped
 ```
+
+`skill_version` and `applies_to` are independent: `applies_to` tracks the external software/doc
+version (bump when targeting a new framework version); `skill_version` tracks our edits. For
+legacy/multi-version coverage, put the prime version in the **folder name** (`react-router-v6/`),
+not the `SKILL.md` filename.
 
 Parsers that stop at the second `---` load only L1 (`name` + `description`).
 Full body load (L2) includes Metadata and execution sections.
@@ -184,5 +191,6 @@ required  scripts are part of execution
 ## Revision rule
 
 When a skill fails in use: tighten description, shorten steps, add validation, or move
-detail to reference files. Bump `version` in `## Metadata`. Log significant changes in
-`## Revision notes` if the skill already has that section.
+detail to reference files. Bump `skill_version` in `## Metadata` (our revision). Bump or change
+`applies_to` only when the skill is retargeted at a different external software/doc version.
+Log significant changes in `## Revision notes` if the skill already has that section.

@@ -16,7 +16,9 @@ description:    [what + when; no padding]
 Body — ## Metadata block:
 
 ```
-version:        [semver, e.g. 1.0.0]
+skill_version:  [semver, e.g. 1.0.0 — our own revision]
+applies_to:     [software@version, comma-separated, or "nulqor" for internal]
+docs:           [official doc URL matched to applies_to, or omit]
 topics:         [comma-separated]
 platform:       [all | windows | macos | linux | combo]
 script_policy:  [none | optional | required]
@@ -39,7 +41,7 @@ has_examples:   [yes | no]
 - [ ] Scope classified; prefix correct if scoped
 - [ ] No duplicate in `<skills-root>/<skill-name>/` or index
 - [ ] Frontmatter will contain only `name` and `description`
-- [ ] `platform` and `script_policy` planned for Metadata block
+- [ ] `applies_to`, `platform`, and `script_policy` planned for Metadata block
 
 ---
 

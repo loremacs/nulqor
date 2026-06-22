@@ -6,7 +6,8 @@ description: Audits skills for structural compliance, contract completeness, and
 ## Metadata
 
 ```text
-version:       2.0.0
+skill_version: 2.0.0
+applies_to:    nulqor
 topics:        meta, audit, skills, lint, compliance
 platform:      all
 script_policy: required

@@ -6,7 +6,8 @@ description: Edit repo code safely — read first, verify with tsc/cargo/audits,
 ## Metadata
 
 ```text
-version:       1.0.0
+skill_version: 1.0.0
+applies_to:    nulqor
 topics:        meta, edit, verify, test, workflow
 platform:      all
 script_policy: none

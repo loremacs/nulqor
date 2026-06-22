@@ -1,15 +1,16 @@
 ---
 name: canvas-layout
 description: >-
-  Use when editing host canvas layout: grid mode, split/layout mode, sub-grids,
-  saved profiles, panel drag, sash, or extensions/host/ui/shell.ts split-render
-  canvas-profiles. Covers invariants, file map, and manual test checklist.
+  Use when editing host canvas layout — grid mode, split/sub-grid layout, saved
+  profiles, panel drag, or sash in extensions/host/ui/shell.ts. Covers
+  invariants, file map, and the manual test checklist.
 ---
 
 ## Metadata
 
 ```text
-version:       1.0.0
+skill_version: 1.0.0
+applies_to:    nulqor, tauri@2
 topics:        host, canvas, grid, split, sub-grid, layout, profiles, ui
 platform:      all
 script_policy: none

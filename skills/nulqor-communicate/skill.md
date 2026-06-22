@@ -6,7 +6,8 @@ description: Talk to a running Nulqor app via HTTP API, MCP, WebSocket, or chat.
 ## Metadata
 
 ```text
-version:       1.0.0
+skill_version: 1.0.0
+applies_to:    nulqor
 topics:        nulqor, http, mcp, chat, observer, api
 platform:      all
 script_policy: required

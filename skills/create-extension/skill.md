@@ -6,7 +6,8 @@ description: Scaffold extensions/<id>/ with colocated manifest, Rust, and option
 ## Metadata
 
 ```text
-version:       1.0.0
+skill_version: 1.0.0
+applies_to:    nulqor, tauri@2
 topics:        meta, extensions, scaffold, tauri
 platform:      all
 script_policy: required

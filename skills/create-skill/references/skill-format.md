@@ -18,7 +18,9 @@ description: >
 ## Metadata
 
 \```text
-version:       1.0.0
+skill_version: 1.0.0
+applies_to:    <software@version, comma-separated, or "nulqor" for internal>
+docs:          <official doc URL matched to applies_to version, or omit>
 topics:        <category>, <keyword>
 platform:      <all|windows|macos|linux|combo>
 script_policy: <none|optional|required>
@@ -95,8 +97,32 @@ Save as: `<skills-root>/<skill-name>/SKILL.md`
 
 Required keys: `when`, `inputs`, `outputs`, `side-effects`, `validation`.
 
-Do not repeat `name`, `version`, `topics`, or `platform` in Contract — those live in
-frontmatter and `## Metadata`.
+Do not repeat `name`, `skill_version`, `applies_to`, `topics`, or `platform` in Contract —
+those live in frontmatter and `## Metadata`.
+
+---
+
+## Two version axes
+
+Skills carry two independent versions so a small model can tell "which thing this documents"
+apart from "which revision of our advice this is":
+
+| Field | Meaning | Example |
+|---|---|---|
+| `applies_to` | The software/framework/OS + version this skill documents (the *external* version). Use `nulqor` for internal process skills. | `tauri@2`, `macos@14+`, `nulqor` |
+| `docs` | Official documentation URL matched to the `applies_to` version. Optional; omit if none. | `https://v2.tauri.app/` |
+| `skill_version` | Our own revision of this skill's guidance (semver). Bump when you change the steps. | `1.0.0` |
+
+**Folder-name version suffix (opt-in).** When a skill documents an externally versioned thing
+and multiple versions must coexist (e.g. legacy library docs), put the prime version in the
+*folder name* — never in the `SKILL.md` filename (the loader and audit require `SKILL.md`):
+
+\```text
+skills/react-router-v6/SKILL.md   ← applies_to: react-router@6
+skills/react-router-v5/SKILL.md   ← legacy, applies_to: react-router@5
+\```
+
+Internal/process skills get no suffix.
 
 ---
 

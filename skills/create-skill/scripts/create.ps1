@@ -4,8 +4,10 @@
 # Usage:
 #   skills/create-skill/scripts/create.ps1 -SkillName <name> -Description "<desc>" -Topics "<topics>"
 #   skills/create-skill/scripts/create.ps1 -SkillName win-foo -Description "..." -Topics "..." -Platform windows
+#   skills/create-skill/scripts/create.ps1 -SkillName mac-foo -Description "..." -Topics "..." -AppliesTo "tauri@2, macos" -Docs "https://v2.tauri.app/"
 #
 # Creates SKILL.md with name/description frontmatter and ## Metadata body block.
+# -AppliesTo: software@version this skill documents (default "nulqor"). -Docs: optional official doc URL.
 # Updates skills/index.md (Skill | Purpose) when present.
 
 param(
@@ -17,6 +19,10 @@ param(
 
     [Parameter(Mandatory)]
     [string]$Topics,
+
+    [string]$AppliesTo = "nulqor",
+
+    [string]$Docs = "",
 
     [ValidateSet("all", "windows", "macos", "linux")]
     [string]$Platform = "all",
@@ -68,6 +74,11 @@ if (Test-Path $SkillDir) {
 New-Item -ItemType Directory -Path $SkillDir    | Out-Null
 New-Item -ItemType Directory -Path $ScriptsDir | Out-Null
 
+$DocsLine = if ($Docs -ne "") { "docs:          $Docs`n" } else { "" }
+# Literal triple-backtick fence. Single-quoted so PowerShell does not treat the
+# backticks as escape characters inside the double-quoted here-string below.
+$fence = "'''" -replace "'", [string][char]96
+
 $SkillContent = @"
 ---
 name: $SkillName
@@ -76,13 +87,14 @@ description: $Description
 
 ## Metadata
 
-```text
-version:       1.0.0
-topics:        $Topics
+${fence}text
+skill_version: 1.0.0
+applies_to:    $AppliesTo
+${DocsLine}topics:        $Topics
 platform:      $Platform
 script_policy: $ScriptPolicy
 scope:         $Scope
-```
+$fence
 
 <One or two sentences: what problem this skill solves.>
 
@@ -96,13 +108,13 @@ scope:         $Scope
 
 ## Contract
 
-```text
+${fence}text
 when:         <trigger expansion>
 inputs:       <param> -- <description, or "none">
 outputs:      <what is produced>
 side-effects: none
 validation:   <observable checks before reporting success>
-```
+$fence
 
 ---
 

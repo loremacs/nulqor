@@ -6,7 +6,9 @@ description: Creates a new skill (SKILL.md, Metadata, contract). Use when adding
 ## Metadata
 
 ```text
-version:       3.0.0
+skill_version: 4.0.0
+applies_to:    nulqor
+docs:          https://openagentskills.dev/docs/specification
 topics:        meta, skills, scaffold, workflow, bootstrap
 platform:      all
 script_policy: optional
@@ -30,7 +32,7 @@ Do not use for one-off fixes or unvalidated processes.
 
 ```text
 when:         Before creating a new skill in skills/
-inputs:       skill_name, description (frontmatter only), topics, platform, script_policy
+inputs:       skill_name, description (frontmatter only), applies_to, topics, platform, script_policy
 outputs:      skills/<skill-name>/SKILL.md; scripts/ when required; skills/index.md row
 side-effects: creates files; updates skills/index.md
 validation:   skills/audit-skill/scripts/audit.ps1 passes; audit-project after index change

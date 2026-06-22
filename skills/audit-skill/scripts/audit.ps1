@@ -164,7 +164,7 @@ function Invoke-SkillAudit([System.IO.DirectoryInfo]$Dir) {
         if ($lines[$fi] -match '^([\w\-]+):\s*(.*)$') {
             $fKey = $Matches[1]
             $fVal = $Matches[2].Trim()
-            if ($fVal -eq '>' -or $fVal -eq '|') {
+            if ($fVal -match '^[>|][+-]?$') {
                 $folded = [System.Collections.ArrayList]@()
                 $fi++
                 while ($fi -lt $fmEnd) {
@@ -219,8 +219,8 @@ function Invoke-SkillAudit([System.IO.DirectoryInfo]$Dir) {
             [void]$f.Add((New-Finding "M12" "WARN" "Frontmatter field '${key}' should move to ## Metadata section"))
         }
     }
-    if ($fm.ContainsKey("version") -or $fm.ContainsKey("topics") -or $fm.ContainsKey("platform")) {
-        [void]$f.Add((New-Finding "M12" "WARN" "version/topics/platform in frontmatter -- move to ## Metadata"))
+    if ($fm.ContainsKey("version") -or $fm.ContainsKey("skill_version") -or $fm.ContainsKey("applies_to") -or $fm.ContainsKey("topics") -or $fm.ContainsKey("platform")) {
+        [void]$f.Add((New-Finding "M12" "WARN" "skill_version/applies_to/topics/platform in frontmatter -- move to ## Metadata"))
     }
 
     $meta = Get-MetadataFields $lines $fmEnd
@@ -230,11 +230,20 @@ function Invoke-SkillAudit([System.IO.DirectoryInfo]$Dir) {
         [void]$f.Add((New-Finding "MD1" "FAIL" "## Metadata section missing"))
     }
 
-    # M8 -- version in Metadata
-    if (-not $meta.ContainsKey("version") -or $meta["version"] -eq "") {
-        [void]$f.Add((New-Finding "M8" "FAIL" "## Metadata missing version"))
-    } elseif ($meta["version"] -notmatch $SEMVER_RE) {
-        [void]$f.Add((New-Finding "M8" "FAIL" "version '$($meta['version'])' is not valid semver"))
+    # M8 -- skill_version in Metadata (our own revision; renamed from version)
+    if (-not $meta.ContainsKey("skill_version") -or $meta["skill_version"] -eq "") {
+        if ($meta.ContainsKey("version")) {
+            [void]$f.Add((New-Finding "M8" "FAIL" "## Metadata uses legacy 'version'; rename to 'skill_version'"))
+        } else {
+            [void]$f.Add((New-Finding "M8" "FAIL" "## Metadata missing skill_version"))
+        }
+    } elseif ($meta["skill_version"] -notmatch $SEMVER_RE) {
+        [void]$f.Add((New-Finding "M8" "FAIL" "skill_version '$($meta['skill_version'])' is not valid semver"))
+    }
+
+    # MD2 -- applies_to in Metadata (software/OS + version this documents; "prime" axis)
+    if (-not $meta.ContainsKey("applies_to") -or $meta["applies_to"] -eq "") {
+        [void]$f.Add((New-Finding "MD2" "FAIL" "## Metadata missing applies_to (e.g. 'nulqor' or 'tauri@2')"))
     }
 
     # M9 -- topics in Metadata
@@ -289,7 +298,7 @@ function Invoke-SkillAudit([System.IO.DirectoryInfo]$Dir) {
                 if ($block -match '(?m)^name:\s+') {
                     [void]$f.Add((New-Finding "C6" "WARN" "Contract contains name: (use frontmatter only)"))
                 }
-                if ($block -match '(?m)^version:\s+') {
+                if ($block -match '(?m)^(skill_)?version:\s+') {
                     [void]$f.Add((New-Finding "C6" "WARN" "Contract contains version: (use ## Metadata)"))
                 }
                 if ($block -match '(?m)^topics:\s+') {

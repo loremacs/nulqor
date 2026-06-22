@@ -212,7 +212,8 @@ description: <what + when; shown in compact index>
 ---
 
 ## Metadata
-(version, topics, platform, script_policy, scope — in body block, not frontmatter)
+(skill_version, applies_to, [docs], topics, platform, script_policy, scope — in body block, not frontmatter)
+# skill_version = our revision (semver); applies_to = external software@version or "nulqor"
 
 ## When to use / ## Contract / ## Steps / ## Verification
 ```
