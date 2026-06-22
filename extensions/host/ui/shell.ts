@@ -49,7 +49,7 @@ import {
 import type { BuiltInPreset, SplitCanvasState } from "./split-layout";
 import { BUILT_IN_PRESETS, defaultSplitState } from "./split-layout";
 import { mountAlwaysOnTopKeeper } from "./always-on-top-keeper";
-import { mountClickThrough } from "./click-through";
+import { mountClickThrough, type ClickThroughHandle } from "./click-through";
 import { mountMenuDockPreview } from "./menu-dock-preview";
 import { promptSaveLayout } from "./save-layout-dialog";
 import { isPanelResizable, mountPanel, registeredPanelIds } from "./panels";
@@ -359,16 +359,25 @@ function trackPointerSession(
   let ended = false;
 
   const cleanup = (): void => {
-    document.removeEventListener("pointermove", move);
-    document.removeEventListener("pointerup", end);
-    document.removeEventListener("pointercancel", end);
+    document.removeEventListener("pointermove", move, true);
+    document.removeEventListener("pointerup", end, true);
+    document.removeEventListener("pointercancel", end, true);
     if (captureTarget && pointerId !== undefined) {
+      captureTarget.removeEventListener("lostpointercapture", onLostCapture);
       try {
         captureTarget.releasePointerCapture(pointerId);
       } catch {
         /* already released */
       }
     }
+  };
+
+  const finish = (event: PointerEvent): void => {
+    if (ended) return;
+    if (pointerId !== undefined && event.pointerId !== pointerId) return;
+    ended = true;
+    cleanup();
+    onEnd(event);
   };
 
   const move = (event: PointerEvent): void => {
@@ -378,26 +387,39 @@ function trackPointerSession(
   };
 
   const end = (event: PointerEvent): void => {
-    if (ended) return;
-    if (pointerId !== undefined && event.pointerId !== pointerId) return;
-    ended = true;
-    cleanup();
-    onEnd(event);
+    finish(event);
+  };
+
+  const onLostCapture = (event: Event): void => {
+    finish(event as PointerEvent);
   };
 
   if (captureTarget && pointerId !== undefined) {
     try {
       captureTarget.setPointerCapture(pointerId);
+      captureTarget.addEventListener("lostpointercapture", onLostCapture);
     } catch (err) {
       console.warn("[host] setPointerCapture failed:", err);
     }
   }
 
-  document.addEventListener("pointermove", move);
-  document.addEventListener("pointerup", end);
-  document.addEventListener("pointercancel", end);
+  document.addEventListener("pointermove", move, true);
+  document.addEventListener("pointerup", end, true);
+  document.addEventListener("pointercancel", end, true);
 
   return cleanup;
+}
+
+async function finishGridDragSession(
+  clickThrough: ClickThroughHandle,
+  resumeClickThrough: () => void,
+): Promise<void> {
+  resumeClickThrough();
+  await clickThrough.flush();
+  if (isMacOS()) {
+    clickThrough.deferPassThrough(250);
+  }
+  clickThrough.refresh();
 }
 
 export type ShellHandle = {
@@ -1718,6 +1740,15 @@ export async function initShell(): Promise<ShellHandle> {
   } | null = null;
 
   let tileResize: { id: string; el: HTMLElement } | null = null;
+  let activeGridPointerCleanup: (() => void) | null = null;
+
+  const endGridPointerSession = async (
+    resumeClickThrough: () => void,
+  ): Promise<void> => {
+    activeGridPointerCleanup?.();
+    activeGridPointerCleanup = null;
+    await finishGridDragSession(clickThrough, resumeClickThrough);
+  };
 
   const desktopOrigin = (): { left: number; top: number } => {
     const rect = desktop.getBoundingClientRect();
@@ -1781,8 +1812,8 @@ export async function initShell(): Promise<ShellHandle> {
     persist();
   };
 
-  // Listen on document rather than desktop so that pointer-events:none on the
-  // canvas element never silently swallows bubbled events in WKWebView.
+  // Capture phase so click-through pass-through cannot swallow panel headers on
+  // macOS before we suspend OS pass-through for the drag session.
   document.addEventListener("pointerdown", (event) => {
     if (canvasMode !== "grid") return;
     const target = event.target as HTMLElement;
@@ -1794,18 +1825,20 @@ export async function initShell(): Promise<ShellHandle> {
       if (!tileEl) return;
       const id = tileEl.dataset.panelId!;
       if (!isPanelResizable(id)) return;
+      activeGridPointerCleanup?.();
       tileResize = { id, el: tileEl };
       desktop.appendChild(tileEl);
       syncPanelStackOrder(id);
       event.preventDefault();
+      event.stopPropagation();
       const resumeClickThrough = clickThrough.suspend();
-      trackPointerSession(
+      void clickThrough.flush();
+      activeGridPointerCleanup = trackPointerSession(
         (moveEvent) => applyResize(moveEvent.clientX, moveEvent.clientY),
         () => {
           tileResize = null;
           persist();
-          resumeClickThrough();
-          syncClickThrough();
+          void endGridPointerSession(resumeClickThrough);
         },
         event.pointerId,
         handle,
@@ -1826,6 +1859,7 @@ export async function initShell(): Promise<ShellHandle> {
     const tileEl = headerEl.closest<HTMLElement>(".panel-tile");
     if (!tileEl) return;
     const id = tileEl.dataset.panelId!;
+    activeGridPointerCleanup?.();
     const tileRect = tileEl.getBoundingClientRect();
     tileDrag = {
       id,
@@ -1835,8 +1869,10 @@ export async function initShell(): Promise<ShellHandle> {
     };
     raiseGridPanel(tileEl, id);
     event.preventDefault();
+    event.stopPropagation();
     const resumeClickThrough = clickThrough.suspend();
-    trackPointerSession(
+    void clickThrough.flush();
+    activeGridPointerCleanup = trackPointerSession(
       (moveEvent) => {
         const next = positionTileFromPointer(
           moveEvent.clientX,
@@ -1849,8 +1885,7 @@ export async function initShell(): Promise<ShellHandle> {
         if (!dragged) {
           finishGridPanelDrag(tileDrag!.el);
           tileDrag = null;
-          resumeClickThrough();
-          syncClickThrough();
+          void endGridPointerSession(resumeClickThrough);
           return;
         }
         const topLeftX = endEvent.clientX - tileDrag!.pointerOffsetX;
@@ -1890,13 +1925,12 @@ export async function initShell(): Promise<ShellHandle> {
         finishGridPanelDrag(tileDrag!.el);
         tileDrag = null;
         persist();
-        resumeClickThrough();
-        syncClickThrough();
+        void endGridPointerSession(resumeClickThrough);
       },
       event.pointerId,
       headerEl,
     );
-  });
+  }, true);
 
   document.addEventListener("click", (event) => {
     const target = event.target as Element;

@@ -4,9 +4,6 @@ import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 const INTERACTIVE_SELECTOR =
   ".menu-bar, .menu-bar-menus, .menu-window-controls, .panel-tile, .panel-resize-handle, .menu-dropdown:not([hidden]), .shell-modal-backdrop, .split-sash, .split-slot-edit-bar, .split-slot-edit-bar button";
 const POLL_MS = 16;
-// Padding around each interactive element's bounding rect.  Must be ≥ GAP/2
-// (where GAP = 8 px between grid cells) so there is no dead zone in the gap.
-const HITBOX_PAD_PX = 6;
 
 export type ClickThroughHandle = {
   refresh: () => void;
@@ -14,6 +11,10 @@ export type ClickThroughHandle = {
   setEnabled: (enabled: boolean) => void;
   /** OS-level pass-through off — use when entering windowed mode. */
   forceClickable: () => void;
+  /** Await pending setIgnoreCursorEvents IPC (call before starting drags on macOS). */
+  flush: () => Promise<void>;
+  /** Briefly block re-enabling pass-through after a drag (macOS click-to-activate). */
+  deferPassThrough: (ms: number) => void;
   dispose: () => void;
 };
 
@@ -23,17 +24,10 @@ function isWindowedMode(): boolean {
 }
 
 function isOverInteractive(clientX: number, clientY: number): boolean {
-  for (const el of document.querySelectorAll<HTMLElement>(
-    INTERACTIVE_SELECTOR,
-  )) {
-    if (el.hidden) continue;
-    const rect = el.getBoundingClientRect();
-    if (
-      clientX >= rect.left - HITBOX_PAD_PX &&
-      clientX <= rect.right + HITBOX_PAD_PX &&
-      clientY >= rect.top - HITBOX_PAD_PX &&
-      clientY <= rect.bottom + HITBOX_PAD_PX
-    ) {
+  // Topmost element at the cursor — rect iteration misses z-order after panel
+  // reorder (appendChild on drag) and over-counts large tile bounds on macOS.
+  for (const el of document.elementsFromPoint(clientX, clientY)) {
+    if ((el as HTMLElement).closest(INTERACTIVE_SELECTOR)) {
       return true;
     }
   }
@@ -83,6 +77,8 @@ export function mountClickThrough(
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let pollFailures = 0;
   let windowFocused = true;
+  let pointerHeld = false;
+  let passThroughDeferredUntil = 0;
   // Window metrics change only on resize / DPI change. Cache them so the
   // high-frequency poll does not make an innerSize + scaleFactor IPC round-trip
   // every tick (cursor position is the only value that must be polled live).
@@ -175,6 +171,13 @@ export function mountClickThrough(
     }
 
     const interactive = isOverInteractive(clientX, clientY);
+    if (
+      !interactive &&
+      (pointerHeld || Date.now() < passThroughDeferredUntil)
+    ) {
+      await ensureClickable();
+      return;
+    }
     await setIgnoring(!interactive);
   };
 
@@ -223,11 +226,18 @@ export function mountClickThrough(
   };
 
   const onPointerDown = (): void => {
+    pointerHeld = true;
     void ensureClickable();
+  };
+
+  const onPointerUp = (): void => {
+    pointerHeld = false;
   };
 
   document.addEventListener("mousemove", onMouseMove, { passive: true });
   document.addEventListener("pointerdown", onPointerDown, true);
+  document.addEventListener("pointerup", onPointerUp, true);
+  document.addEventListener("pointercancel", onPointerUp, true);
 
   // macOS + click-through: pre-empt pass-through when entering interactive targets so
   // the first click after a drag is not swallowed by the OS (click-to-activate).
@@ -252,11 +262,15 @@ export function mountClickThrough(
 
   const suspend = (): (() => void) => {
     suspendCount += 1;
+    stopPoll();
     void ensureClickable();
     return () => {
       suspendCount = Math.max(0, suspendCount - 1);
       if (passThroughAllowed()) {
-        void updateFromPoll();
+        void ensureClickable().then(() => {
+          startPoll();
+          void updateFromPoll();
+        });
       } else {
         void ensureClickable();
       }
@@ -303,6 +317,19 @@ export function mountClickThrough(
 
   let focusUnlisten: (() => void) | null = null;
 
+  const flush = (): Promise<void> => {
+    void ensureClickable();
+    return ipcChain;
+  };
+
+  const deferPassThrough = (ms: number): void => {
+    passThroughDeferredUntil = Math.max(
+      passThroughDeferredUntil,
+      Date.now() + ms,
+    );
+    void ensureClickable();
+  };
+
   const dispose = (): void => {
     disposed = true;
     stopPoll();
@@ -311,6 +338,8 @@ export function mountClickThrough(
     metricsUnlisten.length = 0;
     document.removeEventListener("mousemove", onMouseMove);
     document.removeEventListener("pointerdown", onPointerDown, true);
+    document.removeEventListener("pointerup", onPointerUp, true);
+    document.removeEventListener("pointercancel", onPointerUp, true);
     void ensureClickable().catch(() => {});
   };
 
@@ -355,5 +384,5 @@ export function mountClickThrough(
     void ensureClickable();
   }
 
-  return { refresh, suspend, setEnabled, forceClickable, dispose };
+  return { refresh, suspend, setEnabled, forceClickable, flush, deferPassThrough, dispose };
 }
